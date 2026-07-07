@@ -55,7 +55,37 @@ def test_iter_org_targets_pagination_and_display_name_filter() -> None:
 
     assert len(targets) == 1
     assert targets[0]["id"] == "tgt-1"
+    assert "exclude_empty=false" in calls[0]
     assert "display_name=BB%2Fmy-service" in calls[0]
+
+
+def test_iter_org_targets_exclude_empty_default_false() -> None:
+    calls: list[str] = []
+
+    def fake_urlopen(req: object, timeout: float | None = None) -> object:
+        calls.append(getattr(req, "full_url", ""))
+        return BytesIO(json.dumps({"data": [], "links": {}}).encode())
+
+    client = SnykRestClient(_settings())
+    with patch("integrations.snyk.client.urlopen", side_effect=fake_urlopen):
+        client.iter_org_targets("org-uuid")
+
+    assert "exclude_empty=false" in calls[0]
+    assert "display_name=" not in calls[0]
+
+
+def test_iter_org_targets_exclude_empty_true_omits_param() -> None:
+    calls: list[str] = []
+
+    def fake_urlopen(req: object, timeout: float | None = None) -> object:
+        calls.append(getattr(req, "full_url", ""))
+        return BytesIO(json.dumps({"data": [], "links": {}}).encode())
+
+    client = SnykRestClient(_settings())
+    with patch("integrations.snyk.client.urlopen", side_effect=fake_urlopen):
+        client.iter_org_targets("org-uuid", exclude_empty=True)
+
+    assert "exclude_empty=" not in calls[0]
 
 
 def test_get_org_target() -> None:

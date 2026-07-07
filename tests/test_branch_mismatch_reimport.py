@@ -134,6 +134,7 @@ def test_run_branch_mismatch_reimport_dry_run() -> None:
     )
 
     assert report["skipped"][0]["reason"] == "dry_run"
+    client.iter_org_targets.assert_called_once_with("org-1")
     client.delete_org_target.assert_not_called()
 
 
@@ -191,6 +192,68 @@ def test_run_branch_mismatch_reimport_not_found() -> None:
     )
 
     assert report["not_found"][0]["reason"] == "target_not_found"
+    assert report["not_found"][0]["candidates_returned"] == 0
+
+
+def test_run_branch_mismatch_reimport_branch_mismatch_diagnostics() -> None:
+    entry = DiffEntry(
+        apm_code="ORG1",
+        repository_name="BB/my-service",
+        production_branch="master",
+        target_reference="develop",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
+    client.iter_org_targets.return_value = [
+        _target(branch="main"),
+        _target(display_name="PROJ/my-service", branch="develop"),
+    ]
+
+    report = run_branch_mismatch_reimport(
+        client,
+        [entry],
+        BranchMismatchReimportOptions(dry_run=True),
+    )
+
+    nf = report["not_found"][0]
+    assert nf["reason"] == "target_not_found"
+    assert nf["candidates_returned"] == 2
+    assert nf["same_display_name_branches"] == ["main"]
+    assert nf["near_match_display_names"] == ["PROJ/my-service"]
+
+
+def test_run_branch_mismatch_reimport_same_org_multiple_repos() -> None:
+    entry_a = DiffEntry(
+        apm_code="ORG1",
+        repository_name="BB/service-a",
+        production_branch="master",
+        target_reference="develop",
+    )
+    entry_b = DiffEntry(
+        apm_code="ORG1",
+        repository_name="BB/service-b",
+        production_branch="master",
+        target_reference="develop",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
+    client.iter_org_targets.return_value = [
+        _target(target_id="tgt-a", display_name="BB/service-a", repo_slug="service-a"),
+        _target(target_id="tgt-b", display_name="BB/service-b", repo_slug="service-b"),
+    ]
+
+    report = run_branch_mismatch_reimport(
+        client,
+        [entry_a, entry_b],
+        BranchMismatchReimportOptions(dry_run=True),
+    )
+
+    client.iter_org_targets.assert_called_once_with("org-1")
+    assert len(report["skipped"]) == 2
+    assert report["skipped"][0]["target_id"] == "tgt-a"
+    assert report["skipped"][1]["target_id"] == "tgt-b"
 
 
 def test_run_branch_mismatch_reimport_already_correct() -> None:

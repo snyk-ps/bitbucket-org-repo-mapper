@@ -370,6 +370,7 @@ class SnykRestClient:
         org_id: str,
         *,
         display_name: str | None = None,
+        exclude_empty: bool = False,
     ) -> list[dict[str, Any]]:
         """Return REST target resource objects for an org, optionally filtered by display name."""
         s = self._settings
@@ -377,6 +378,8 @@ class SnykRestClient:
         base_path = f"{s.rest_root}/orgs/{oid}/targets"
         sep = "&" if "?" in base_path else "?"
         first = f"{base_path}{sep}version={s.api_version}"
+        if not exclude_empty:
+            first = f"{first}&exclude_empty=false"
         if display_name is not None and display_name.strip():
             encoded = quote(display_name.strip(), safe="")
             first = f"{first}&display_name={encoded}"

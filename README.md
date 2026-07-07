@@ -443,7 +443,9 @@ PYTHONPATH=src python src/main.py snyk-post-import-cleanup \
 
 Operational script for Scotia-style branch remediation: reads a `diff.json` artifact (output of a Bitbucket-vs-Snyk branch comparison), deletes each mismatched Snyk target, and reimports it with the correct `production_branch` via [`snyk-api-import`](https://docs.snyk.io/developer-tools/snyk-apps/tool-snyk-api-import).
 
-Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target display name, e.g. `BB/my-service`), `production_branch` (desired branch), and `target_reference` (current wrong branch).
+Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target **display name** from the Snyk Targets API, e.g. `BB/my-service`), `production_branch` (desired branch), and `target_reference` (current branch on the target resource — must match `attributes.target_reference` exactly).
+
+Target lookup lists **all** targets in the org via REST (`GET /rest/orgs/{org_id}/targets?exclude_empty=false`) and matches client-side on `display_name` + `target_reference`. Empty targets (no projects) are included; the API omits them by default without `exclude_empty=false`.
 
 **Destructive** — deletes targets and all associated projects before reimport. Run `--dry-run` in UAT first.
 
@@ -466,6 +468,17 @@ Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target d
 - Do **not** delete or move `imported-targets.log` while an import is running — doing so causes skipped imports and 404 errors.
 - Custom branching must be enabled in the target Snyk environment before reimport.
 - Empty-target cleanup after import is handled separately in Snyk (not by this script).
+- On single-tenant Snyk, set `SNYK_API` to your tenant API origin (not `https://api.snyk.io`).
+
+**Report diagnostics (`target_not_found`):**
+
+When a target is not matched, the report includes:
+
+| Field | Meaning |
+|-------|---------|
+| `candidates_returned` | Targets returned for the org (after `exclude_empty=false`) |
+| `same_display_name_branches` | Branches seen on targets whose `display_name` matches `repository_name` but `target_reference` differed — diff may be stale |
+| `near_match_display_names` | Other target display names containing the repo slug — `repository_name` in diff may be wrong |
 
 UAT dry-run example:
 

@@ -163,6 +163,14 @@ def _entry_record(entry: DiffEntry, **extra: Any) -> dict[str, Any]:
     return base
 
 
+def _repo_slug_from_repository_name(repository_name: str) -> str:
+    if repository_name.startswith(APP_TYPE_PREFIX):
+        return repository_name[len(APP_TYPE_PREFIX) :]
+    if "/" in repository_name:
+        return repository_name.rsplit("/", 1)[-1]
+    return repository_name
+
+
 def _find_matching_targets(
     targets: list[dict[str, Any]],
     entry: DiffEntry,
@@ -174,6 +182,34 @@ def _find_matching_targets(
         if display == entry.repository_name and branch == entry.target_reference:
             matches.append(target)
     return matches
+
+
+def _target_not_found_diagnostics(
+    targets: list[dict[str, Any]],
+    entry: DiffEntry,
+) -> dict[str, Any]:
+    """Build diagnostic fields when no target matches display_name + target_reference."""
+    same_name_branches: list[str] = []
+    near_match_names: list[str] = []
+    slug = _repo_slug_from_repository_name(entry.repository_name)
+    for target in targets:
+        display = target_display_name(target)
+        if display is None:
+            continue
+        branch = target_branch_reference(target)
+        if display == entry.repository_name:
+            if branch is not None and branch not in same_name_branches:
+                same_name_branches.append(branch)
+        elif slug and slug in display and display not in near_match_names:
+            near_match_names.append(display)
+    out: dict[str, Any] = {
+        "candidates_returned": len(targets),
+    }
+    if same_name_branches:
+        out["same_display_name_branches"] = same_name_branches
+    if near_match_names:
+        out["near_match_display_names"] = near_match_names
+    return out
 
 
 def _empty_report_buckets() -> dict[str, list[dict[str, Any]]]:
@@ -255,12 +291,9 @@ def run_branch_mismatch_reimport(
     import_queue: list[tuple[DiffEntry, dict[str, Any]]] = []
     org_targets_cache: dict[str, list[dict[str, Any]]] = {}
 
-    def targets_for_org(org_id: str, display_name: str) -> list[dict[str, Any]]:
+    def targets_for_org(org_id: str) -> list[dict[str, Any]]:
         if org_id not in org_targets_cache:
-            org_targets_cache[org_id] = client.iter_org_targets(
-                org_id,
-                display_name=display_name,
-            )
+            org_targets_cache[org_id] = client.iter_org_targets(org_id)
         return org_targets_cache[org_id]
 
     for entry in entries:
@@ -278,7 +311,7 @@ def run_branch_mismatch_reimport(
             continue
 
         try:
-            candidates = targets_for_org(org_id, entry.repository_name)
+            candidates = targets_for_org(org_id)
             matches = _find_matching_targets(candidates, entry)
         except RuntimeError as exc:
             buckets["failed"].append(
@@ -288,7 +321,12 @@ def run_branch_mismatch_reimport(
 
         if not matches:
             buckets["not_found"].append(
-                _entry_record(entry, org_id=org_id, reason="target_not_found"),
+                _entry_record(
+                    entry,
+                    org_id=org_id,
+                    reason="target_not_found",
+                    **_target_not_found_diagnostics(candidates, entry),
+                ),
             )
             continue
         if len(matches) > 1:
