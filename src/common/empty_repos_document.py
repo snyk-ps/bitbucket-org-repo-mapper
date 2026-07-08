@@ -21,7 +21,7 @@ def default_empty_repos_filename(source: DiscoverySource) -> str:
     return DEFAULT_EMPTY_REPOS_FILENAME
 
 
-def _empty_repo_entry(row: dict[str, Any]) -> dict[str, str] | None:
+def _empty_repo_entry(row: dict[str, Any], *, source: DiscoverySource) -> dict[str, str] | None:
     path = row.get("repository_path")
     if not isinstance(path, str) or "/" not in path:
         return None
@@ -30,6 +30,16 @@ def _empty_repo_entry(row: dict[str, Any]) -> dict[str, str] | None:
         return None
     name = row.get("repository_name")
     repo_name = name if isinstance(name, str) else repo_slug
+    if source == "github":
+        github_org = row.get("github_org")
+        org_login = github_org if isinstance(github_org, str) else project_key
+        return {
+            "repository_path": path,
+            "project_key": project_key,
+            "repo_slug": repo_slug,
+            "repository_name": repo_name,
+            "github_org": org_login,
+        }
     project_name = row.get("bitbucket_project_name")
     bitbucket_project_name = project_name if isinstance(project_name, str) else project_key
     return {
@@ -51,7 +61,7 @@ def build_empty_repos_document(
     for row in rows:
         if not row_is_empty(row):
             continue
-        entry = _empty_repo_entry(row)
+        entry = _empty_repo_entry(row, source=source)
         if entry is not None:
             repositories.append(entry)
     repositories.sort(key=lambda item: item["repository_path"])

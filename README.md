@@ -137,7 +137,7 @@ pip install -e ".[dev]"
 
 **Spreadsheet** reads `bb-repo-mapping.xlsx` (project keys + semicolon-delimited repo slugs), queries Bitbucket per repo for YAML-derived APM and full row metadata (see [Stage 1 (spreadsheet)](#stage-1-spreadsheet)), and writes discovery JSON with `source: bitbucket`.
 
-**GitHub** lists repositories for each org in **`--orgs`** (comma-separated logins), applies the same empty-repo and committer rules via the GitHub REST API, reads AppSec YAML from non-empty repos, and writes discovery JSON with **`source: github`**. With `-o`, also writes **`github-empty-repos.json`** by default (same override/disable flags as Bitbucket). There is no spreadsheet ingress for GitHub.
+**GitHub** lists repositories for each org in **`--orgs`** (comma-separated logins), applies the same empty-repo and committer rules via the GitHub REST API, reads AppSec YAML from non-empty repos for **`production_branch`** only, derives **`apm_code`** from repository topics (default: topic `apm-ABC1` → `ABC1`), and writes discovery JSON with **`source: github`**. With `-o`, also writes **`github-empty-repos.json`** by default (same override/disable flags as Bitbucket). There is no spreadsheet ingress for GitHub.
 
 Discovery is the handoff artifact for Stages 2 and 3. Shape: `version`, `source` (`bitbucket`, `spreadsheet`, or `github`), `rows`, and optional `checkpoint` for resume (file output). Legacy **primary mapping** files (wrapper without `source`, or a bare array) are still accepted as `--discovery` input in Stages 2–3; `source` is treated as `bitbucket` for compatibility.
 
@@ -206,13 +206,15 @@ Uses the same **`BITBUCKET_*`** variables as Bitbucket discovery (see above), in
 | Flag | Description |
 |------|-------------|
 | `--orgs ORG1,ORG2` | **Required.** Comma-separated GitHub organization logins to crawl. |
+| `--apm-topic-regex REGEX` | Regex with one capture group to extract `apm_code` from repository topics (default: `^apm-(.+)$`; e.g. `apm-ABC1` → `ABC1`). |
 | `--empty-repos-output PATH` | Write empty-repository list JSON (default: `github-empty-repos.json` when `-o` is set). |
 | `--no-empty-repos-output` | Do not write the empty-repos file even when `-o` is set. |
 
 - **Empty repos:** Zero commits, or **no default branch** in GitHub metadata → `is_empty: true` (skipped in Stage 3).
-- **Row paths:** `repository_path` is `{org_login}/{repo_name}`; `bitbucket_project_name` holds the org display name (legacy field name for schema compatibility).
+- **Row paths:** `repository_path` is `{org_login}/{repo_name}`; **`github_org`** is the org login (same as the path prefix).
+- **APM:** `apm_code` comes from repository **topics** matching `--apm-topic-regex`, not from AppSec YAML.
 
-**Token permissions:** Discovery is read-only. It calls `GET /orgs/{org}`, `GET /orgs/{org}/repos`, `GET /repos/{owner}/{repo}/commits`, and `GET /repos/{owner}/{repo}/contents/{path}`. The token owner must be a **member** of each org in `--orgs` with access to the repositories being crawled.
+**Token permissions:** Discovery is read-only. It calls `GET /orgs/{org}`, `GET /orgs/{org}/repos`, `GET /repos/{owner}/{repo}/commits`, `GET /repos/{owner}/{repo}/topics`, and `GET /repos/{owner}/{repo}/contents/{path}`. The token owner must be a **member** of each org in `--orgs` with access to the repositories being crawled.
 
 **Fine-grained PAT (GitHub.com):** Grant access to the target org(s). Repository permissions: **Contents** (Read-only) and **Metadata** (Read-only). No write or admin permissions are required.
 
@@ -307,7 +309,7 @@ If you omit `--env-file`, the CLI loads `.env` from the **current working direct
 |---------|---------|-----------|
 | `discover bitbucket` | Bitbucket → discovery or stdout rows | `-o`, `--empty-repos-output`, `--no-empty-repos-output`, `--env-file`, `--max-repos`, `--flush-interval` |
 | `discover spreadsheet` | `bb-repo-mapping.xlsx` + Bitbucket → discovery | `-i`, `-o`, `--env-file`, `--max-repos`, `--flush-interval`, empty-repos flags |
-| `discover github` | GitHub orgs → discovery | `--orgs`, `-o`, `--env-file`, `--max-repos`, `--flush-interval`, empty-repos flags |
+| `discover github` | GitHub orgs → discovery | `--orgs`, `--apm-topic-regex`, `-o`, `--env-file`, `--max-repos`, `--flush-interval`, empty-repos flags |
 | `snyk-orgs` | discovery → `snyk-orgs.json` | `--discovery`, `--output`, `--group-id`, `--template-org-id`, `--dry-run` |
 | `snyk-broker-plan` | snyk-orgs → broker-org-plan.json | `--snyk-orgs`, `--output`, `--tenant-id`, `--install-id`, `--env-file`, `--dry-run` |
 | `snyk-broker-apply` | plan → broker-org-apply-report.json | `--plan`, `--output`, `--env-file`, `--dry-run` |
@@ -350,6 +352,28 @@ PYTHONPATH=src python src/main.py snyk-post-import-cleanup -h
     "project_key": "MYPROJ",
     "repo_slug": "my-service"
   }
+}
+```
+
+GitHub rows use **`github_org`** (org login) instead of `bitbucket_project_name`, and **`apm_code`** from repository topics:
+
+```json
+{
+  "version": 1,
+  "source": "github",
+  "rows": [
+    {
+      "apm_code": "ABC1",
+      "repository_path": "acme-corp/my-service",
+      "repository_name": "my-service",
+      "production_branch": "main",
+      "github_org": "acme-corp",
+      "is_empty": false,
+      "last_committer_name": "charlie",
+      "last_committer_email": "charlie@example.com",
+      "last_commit_date": "2024-03-15T10:30:00+00:00"
+    }
+  ]
 }
 ```
 

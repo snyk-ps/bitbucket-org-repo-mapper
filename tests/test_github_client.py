@@ -114,3 +114,14 @@ def test_iter_org_repositories_paginates() -> None:
         names = [repo["name"] for repo in client.iter_org_repositories("acme")]
 
     assert names == ["a", "b"]
+
+
+def test_repository_topics_returns_names() -> None:
+    payload = json.dumps({"names": ["apm-ABC1", "docs"]}).encode()
+    client = GitHubClient("https://api.github.com", "token")
+
+    with patch("integrations.github.client.urlopen") as mock_open:
+        mock_open.return_value.__enter__.return_value = _FakeResp(payload)
+        topics = client.repository_topics("acme", "svc")
+
+    assert topics == ["apm-ABC1", "docs"]

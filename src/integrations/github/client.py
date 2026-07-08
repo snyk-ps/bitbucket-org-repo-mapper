@@ -252,6 +252,19 @@ class GitHubClient:
             msg = "Network error calling GitHub commits API"
             raise RuntimeError(msg) from exc
 
+    def repository_topics(self, owner: str, repo: str) -> list[str]:
+        """Return repository topic names from the GitHub topics API."""
+        own = quote(owner, safe="")
+        name = quote(repo, safe="")
+        payload, _link = self._request(f"repos/{own}/{name}/topics")
+        if not isinstance(payload, dict):
+            msg = "Unexpected GitHub topics API response shape"
+            raise RuntimeError(msg)
+        names = payload.get("names")
+        if not isinstance(names, list):
+            return []
+        return [topic for topic in names if isinstance(topic, str) and topic.strip()]
+
     def fetch_file_contents(
         self,
         owner: str,

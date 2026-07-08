@@ -14,7 +14,11 @@ from commands.discovery_helpers import (
     run_discovery_with_file_output,
 )
 from common.empty_repos_document import write_empty_repos_document
-from common.github_mapper import iter_github_mapping
+from common.github_mapper import (
+    DEFAULT_APM_TOPIC_REGEX,
+    compile_apm_topic_regex,
+    iter_github_mapping,
+)
 from config import load_dotenv_file
 from config.github_settings import load_github_settings
 from integrations.github import GitHubClient
@@ -90,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not write github-empty-repos.json even when -o/--output is set.",
     )
+    parser.add_argument(
+        "--apm-topic-regex",
+        default=DEFAULT_APM_TOPIC_REGEX,
+        metavar="REGEX",
+        help=(
+            "Regex with one capture group to extract apm_code from repository topics "
+            f"(default: {DEFAULT_APM_TOPIC_REGEX!r}; e.g. topic apm-ABC1 yields ABC1)."
+        ),
+    )
     return parser
 
 
@@ -105,6 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = load_github_settings()
         org_logins = parse_org_list(args.orgs)
+        apm_topic_pattern = compile_apm_topic_regex(args.apm_topic_regex)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -137,6 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     settings.file_path,
                     org_logins,
                     completed_keys=completed,
+                    apm_topic_pattern=apm_topic_pattern,
                     max_repos=args.max_repos,
                 ),
                 flush_interval=flush_interval,
@@ -150,6 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     settings.file_path,
                     org_logins,
                     completed_keys=set(),
+                    apm_topic_pattern=apm_topic_pattern,
                     max_repos=args.max_repos,
                 )
             )
