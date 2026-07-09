@@ -2,6 +2,8 @@
 
 Stage 4 (`snyk-post-import-cleanup`) fails immediately for customers with **HTTP 400 Bad Request** when listing Dockerfile projects. The root cause is an incorrect Snyk v1 query parameter: the client sends `type=dockerfile` but the API expects `types=dockerfile`. Stage 4 never reaches project deletion because the first filtered list call fails per org.
 
+**Superseded:** Stage 4 now lists projects via REST with client-side `dockerfile` filtering ([`fix-branch-reconciliation-uat`](../fix-branch-reconciliation-uat/)). Close this change without merging unless still on v1 project listing.
+
 ## What Changes
 
 - Fix `SnykRestClient.iter_org_projects` to append `types={value}` (not `type={value}`) when `project_type` is set.

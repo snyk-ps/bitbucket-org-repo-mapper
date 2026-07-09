@@ -6,9 +6,12 @@ import json
 from io import BytesIO
 from unittest.mock import patch
 
+import pytest
+
 from config.snyk_settings import SnykSettings
 from integrations.snyk.client import (
     SnykRestClient,
+    _build_project_patch_body,
     normalize_rest_project,
     normalize_v1_projects_payload,
 )
@@ -121,7 +124,7 @@ def test_update_project_settings_patch() -> None:
     settings = {"recurringTests": {"frequency": "never"}}
     client = SnykRestClient(_settings())
     with patch("integrations.snyk.client.urlopen", side_effect=fake_urlopen):
-        client.update_project_settings("org-uuid", "proj-uuid", settings)
+        client.update_project_settings("org-uuid", "proj-uuid", settings, "user-uuid")
 
     assert captured["method"] == "PATCH"
     assert captured["url"] == (
@@ -136,5 +139,22 @@ def test_update_project_settings_patch() -> None:
                     "recurring_tests": {"frequency": "never"},
                 },
             },
+            "relationships": {
+                "owner": {
+                    "data": {
+                        "type": "user",
+                        "id": "user-uuid",
+                    },
+                },
+            },
         },
     }
+
+
+def test_build_project_patch_body_rejects_empty_user_id() -> None:
+    with pytest.raises(ValueError, match="user_id is required"):
+        _build_project_patch_body(
+            "proj-uuid",
+            {"recurringTests": {"frequency": "never"}},
+            "  ",
+        )

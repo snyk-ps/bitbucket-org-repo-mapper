@@ -115,6 +115,35 @@ def _v1_project_settings_to_rest(settings: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _build_project_patch_body(
+    project_id: str,
+    settings: dict[str, Any],
+    user_id: str,
+) -> dict[str, Any]:
+    """Build JSON:API PATCH body for a project resource."""
+    uid = user_id.strip()
+    if not uid:
+        msg = "user_id is required for project settings PATCH"
+        raise ValueError(msg)
+    return {
+        "data": {
+            "id": project_id.strip(),
+            "type": "project",
+            "attributes": {
+                "settings": _v1_project_settings_to_rest(settings),
+            },
+            "relationships": {
+                "owner": {
+                    "data": {
+                        "type": "user",
+                        "id": uid,
+                    },
+                },
+            },
+        },
+    }
+
+
 def normalize_v1_integrations_payload(parsed: Any) -> list[dict[str, Any]]:
     """Turn v1 GET /org/.../integrations JSON into a list of integration objects.
 
@@ -498,6 +527,7 @@ class SnykRestClient:
         org_id: str,
         project_id: str,
         settings: dict[str, Any],
+        user_id: str,
     ) -> None:
         """PATCH project settings via Snyk REST API."""
         s = self._settings
@@ -506,17 +536,9 @@ class SnykRestClient:
         base_path = f"{s.rest_root}/orgs/{oid}/projects/{pid}"
         sep = "&" if "?" in base_path else "?"
         url = f"{base_path}{sep}version={s.api_version}"
-        body = json.dumps(
-            {
-                "data": {
-                    "id": pid,
-                    "type": "project",
-                    "attributes": {
-                        "settings": _v1_project_settings_to_rest(settings),
-                    },
-                },
-            }
-        ).encode("utf-8")
+        body = json.dumps(_build_project_patch_body(pid, settings, user_id)).encode(
+            "utf-8"
+        )
         req = Request(
             url,
             data=body,

@@ -256,6 +256,38 @@ def test_run_branch_mismatch_reimport_same_org_multiple_repos() -> None:
     assert report["skipped"][1]["target_id"] == "tgt-b"
 
 
+def test_run_branch_mismatch_reimport_scotia_stale_branch_diagnostic() -> None:
+    """UAT example: diff says master but target is on main — surfaces stale diff."""
+    entry = DiffEntry(
+        apm_code="ABCD",
+        repository_name="BB/uat-bitbucket-java-sample",
+        production_branch="snyk-pr-scan-test",
+        target_reference="master",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ABCD"}]
+    client.iter_org_targets.return_value = [
+        _target(
+            display_name="BB/uat-bitbucket-java-sample",
+            branch="main",
+            repo_slug="uat-bitbucket-java-sample",
+        ),
+    ]
+
+    report = run_branch_mismatch_reimport(
+        client,
+        [entry],
+        BranchMismatchReimportOptions(dry_run=True),
+    )
+
+    nf = report["not_found"][0]
+    assert nf["reason"] == "target_not_found"
+    assert nf["same_display_name_branches"] == ["main"]
+    assert nf["production_branch"] == "snyk-pr-scan-test"
+    assert nf["target_reference"] == "master"
+
+
 def test_run_branch_mismatch_reimport_already_correct() -> None:
     entry = DiffEntry(
         apm_code="ORG1",

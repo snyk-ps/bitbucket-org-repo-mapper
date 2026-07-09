@@ -104,7 +104,7 @@ After `pip install -e .`, the same flows are available as `repo-mapper-discover-
 - **Stages 2.1–2.2 (Broker):** `SNYK_TOKEN`, `SNYK_TENANT_ID`, `SNYK_BROKER_INSTALL_ID`; `SNYK_GROUP_ID` recommended for org name → UUID resolution.
 - **Stage 2.3 (integration settings):** `SNYK_TOKEN`; `SNYK_INTEGRATIONS_API` must be `v1` (default). Token needs permission to edit integrations.
 - **Stage 3:** Snyk REST credentials (`SNYK_TOKEN`, `SNYK_GROUP_ID`); optional `--snyk-orgs` for a consistency check.
-- **Stage 4 (post-import cleanup):** `SNYK_TOKEN`, `SNYK_GROUP_ID`; `SNYK_INTEGRATIONS_API` must be `v1`. Set `SNYK_API` to your tenant API origin on single-tenant instances (e.g. `https://api.example.my.snyk.io`, no `/rest` or `/v1` suffix). Token needs permission to delete projects, edit integrations, and edit org language settings. Use `--dry-run` before the first live run.
+- **Stage 4 (post-import cleanup):** `SNYK_TOKEN`, `SNYK_GROUP_ID`, `SNYK_USER_ID`; `SNYK_INTEGRATIONS_API` must be `v1`. Set `SNYK_API` to your tenant API origin on single-tenant instances (e.g. `https://api.example.my.snyk.io`, no `/rest` or `/v1` suffix). Token needs permission to delete projects, edit integrations, and edit org language settings. Use `--dry-run` before the first live run.
 
 ## Installation
 
@@ -150,7 +150,7 @@ Reads `--discovery`, builds import targets (skips rows with **`is_empty: true`**
 
 ### Stage 4 — Post-import cleanup (`snyk-post-import-cleanup`)
 
-Iterates **every org** in `SNYK_GROUP_ID` and, per org: **lists** projects via the REST Projects API (type `dockerfile` filtered client-side), **deletes** those Dockerfile projects, **PATCH**es recurring test frequency to `never` on all remaining projects, **PUT**s the Stage 2.3 Bitbucket Server integration settings profile (v1 integrations API), and **PATCH**es org Python language settings to **3.12** (Pip). Writes **`post-import-cleanup-report.json`** (version 2). **`--dry-run`** prints the report to stdout without DELETE, PUT, or PATCH. Requires `SNYK_INTEGRATIONS_API=v1` for integration settings only. On single-tenant Snyk, set `SNYK_API` to your tenant origin (not `https://api.snyk.io`). **Destructive** — run dry-run first. Existing Python projects may need a re-test for scan results to reflect the new version.
+Iterates **every org** in `SNYK_GROUP_ID` and, per org: **lists** projects via the REST Projects API (type `dockerfile` filtered client-side), **deletes** those Dockerfile projects, **PATCH**es recurring test frequency to `never` on all remaining projects (requires `SNYK_USER_ID` as project owner), **PUT**s the Stage 2.3 Bitbucket Server integration settings profile (v1 integrations API), and **PATCH**es org Python language settings to **3.12** (Pip). Writes **`post-import-cleanup-report.json`** (version 2). **`--dry-run`** prints the report to stdout without DELETE, PUT, or PATCH. Requires `SNYK_INTEGRATIONS_API=v1` for integration settings only. On single-tenant Snyk, set `SNYK_API` to your tenant origin (not `https://api.snyk.io`). **Destructive** — run dry-run first. Existing Python projects may need a re-test for scan results to reflect the new version.
 
 ## Configuration by stage
 
@@ -238,6 +238,7 @@ Uses `SNYK_TOKEN` and **`SNYK_INTEGRATIONS_API=v1`** (required). Processes only 
 |----------|----------|-------------|
 | `SNYK_TOKEN` | Yes | Snyk API token. |
 | `SNYK_GROUP_ID` | Yes | UUID of the Snyk **Group** whose orgs are normalized. |
+| `SNYK_USER_ID` | Yes | Snyk user UUID for project owner on recurring-test settings PATCH. |
 | `SNYK_INTEGRATIONS_API` | Yes | Must be `v1` (default). Integration settings PUT is not implemented for REST. |
 | `SNYK_API` | No | Snyk API **origin** only (scheme + host), e.g. `https://api.snyk.io` or `https://api.example.my.snyk.io` on single-tenant. Required for REST project list/delete/settings and org language PATCH. |
 | `SNYK_API_VERSION` | No | REST API version query parameter (date string). Default `2024-10-15`. |
@@ -247,6 +248,9 @@ Uses `SNYK_TOKEN` and **`SNYK_INTEGRATIONS_API=v1`** (required). Processes only 
 |------|-------------|
 | `--output PATH` | Cleanup report (default: `post-import-cleanup-report.json`). |
 | `--dry-run` | Print report JSON to stdout; no DELETE, PUT, or PATCH. |
+| `--user-id UUID` | Override `SNYK_USER_ID` for project settings PATCH owner. |
+
+**Dry-run vs live:** `--dry-run` skips DELETE, PUT, and PATCH — it will not surface HTTP 400 from project-settings PATCH. Live runs require `SNYK_USER_ID` (REST PATCH needs `relationships.owner`). PATCH HTTP 404 on a project already deleted in the dockerfile step is recorded as `recurring_test_frequency.skipped` with `reason: project_not_found`.
 
 Processes **every org** in the group. **Destructive** — deletes Dockerfile Snyk projects; run `--dry-run` first.
 
@@ -265,7 +269,7 @@ If you omit `--env-file`, the CLI loads `.env` from the **current working direct
 | `snyk-broker-apply` | plan → broker-org-apply-report.json | `--plan`, `--output`, `--env-file`, `--dry-run` |
 | `snyk-broker-integration-settings` | apply report → settings report | `--report`, `--output`, `--env-file`, `--dry-run` |
 | `snyk-import` | discovery → `snyk-import.json` + Snyk IDs | `--discovery`, `--output`, `--repos-per-batch` (optional), `--snyk-orgs`, `--default-org-id`, `--env-file`, `--dry-run` |
-| `snyk-post-import-cleanup` | group-wide post-import normalization | `--output`, `--env-file`, `--dry-run` |
+| `snyk-post-import-cleanup` | group-wide post-import normalization | `--output`, `--env-file`, `--dry-run`, `--user-id` |
 
 ```bash
 PYTHONPATH=src python src/main.py -h
@@ -427,6 +431,7 @@ Post-import cleanup (dry run first):
 ```bash
 export SNYK_TOKEN='your-token'
 export SNYK_GROUP_ID='your-group-uuid'
+export SNYK_USER_ID='your-user-uuid'
 
 PYTHONPATH=src python src/main.py snyk-post-import-cleanup --dry-run
 
@@ -443,7 +448,9 @@ PYTHONPATH=src python src/main.py snyk-post-import-cleanup \
 
 Operational script for Scotia-style branch remediation: reads a `diff.json` artifact (output of a Bitbucket-vs-Snyk branch comparison), deletes each mismatched Snyk target, and reimports it with the correct `production_branch` via [`snyk-api-import`](https://docs.snyk.io/developer-tools/snyk-apps/tool-snyk-api-import).
 
-Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target **display name** from the Snyk Targets API, e.g. `BB/my-service`), `production_branch` (desired branch), and `target_reference` (current branch on the target resource — must match `attributes.target_reference` exactly).
+Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target **display name** from the Snyk Targets API, e.g. `BB/my-service`), `production_branch` (desired branch after reimport), and `target_reference` (current branch on the **target** resource — must match `attributes.target_reference` exactly).
+
+**Diff field provenance:** Generate `diff.json` with [`scripts/lookup_target_reference.py`](scripts/lookup_target_reference.py) (or equivalent). That script lists Bitbucket Server targets per org and sets `target_reference` from the **target** resource (`attributes.target_reference`), not from project attributes alone. Using project-level `target_reference` in the diff causes false `target_not_found` when project and target disagree (seen on Scotia single-tenant UAT). Merge with your security.yaml comparison to add `production_branch`.
 
 Target lookup lists **all** targets in the org via REST (`GET /rest/orgs/{org_id}/targets?exclude_empty=false`) and matches client-side on `display_name` + `target_reference`. Empty targets (no projects) are included; the API omits them by default without `exclude_empty=false`.
 
@@ -479,6 +486,13 @@ When a target is not matched, the report includes:
 | `candidates_returned` | Targets returned for the org (after `exclude_empty=false`) |
 | `same_display_name_branches` | Branches seen on targets whose `display_name` matches `repository_name` but `target_reference` differed — diff may be stale |
 | `near_match_display_names` | Other target display names containing the repo slug — `repository_name` in diff may be wrong |
+
+**UAT re-test checklist (Scotia-style):**
+
+1. Regenerate `diff.json` with `lookup_target_reference.py` using tenant `SNYK_API` and `SNYK_TOKEN`.
+2. Dry-run reimport on a known mismatch, e.g. `BB/uat-bitbucket-java-sample` with `--limit 5`; confirm match or actionable diagnostics (not silent `target_not_found`).
+3. Live reimport on 1–2 repos; verify Snyk target `target_reference` equals `production_branch` after import.
+4. Stage 4: set `SNYK_USER_ID`, run `--dry-run`, then live on one org; confirm recurring-test PATCH succeeds (dry-run skips PATCH — live run validates owner `user_id`).
 
 UAT dry-run example:
 
