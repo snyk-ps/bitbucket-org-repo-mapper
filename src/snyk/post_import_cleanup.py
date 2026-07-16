@@ -29,6 +29,7 @@ def _project_field(project: dict[str, Any], *keys: str) -> str | None:
 def run_post_import_cleanup(
     client: SnykRestClient,
     *,
+    user_id: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Normalize every org in the configured Snyk group."""
@@ -117,6 +118,7 @@ def run_post_import_cleanup(
                     org_id,
                     project_id,
                     RECURRING_TEST_FREQUENCY_NEVER,
+                    user_id,
                 )
                 frequency_updated.append(
                     {
@@ -127,15 +129,27 @@ def run_post_import_cleanup(
                     }
                 )
             except RuntimeError as exc:
-                frequency_failed.append(
-                    {
-                        "org_id": org_id,
-                        "project_id": project_id,
-                        "project_name": project_name,
-                        "project_type": project_type,
-                        "error": str(exc),
-                    }
-                )
+                error = str(exc)
+                if "HTTP 404" in error:
+                    frequency_skipped.append(
+                        {
+                            "org_id": org_id,
+                            "project_id": project_id,
+                            "project_name": project_name,
+                            "project_type": project_type,
+                            "reason": "project_not_found",
+                        }
+                    )
+                else:
+                    frequency_failed.append(
+                        {
+                            "org_id": org_id,
+                            "project_id": project_id,
+                            "project_name": project_name,
+                            "project_type": project_type,
+                            "error": error,
+                        }
+                    )
 
         outcome = apply_bitbucket_integration_settings_to_org(
             client,

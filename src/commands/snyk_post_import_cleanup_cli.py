@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -20,7 +21,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Stage 4 — Delete Dockerfile projects, set recurring test frequency to never, "
             "apply integration settings, and set org Python language version to 3.12 "
-            "for every org in SNYK_GROUP_ID."
+            "for every org in SNYK_GROUP_ID. Requires SNYK_USER_ID (or --user-id) for "
+            "project settings PATCH owner."
         ),
     )
     parser.add_argument(
@@ -40,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would change; do not DELETE projects or issue PUT/PATCH requests.",
+    )
+    parser.add_argument(
+        "--user-id",
+        default=None,
+        metavar="UUID",
+        help="Snyk user id for project owner on settings PATCH (or SNYK_USER_ID).",
     )
     return parser
 
@@ -79,8 +87,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
+    user_id = (args.user_id or os.environ.get("SNYK_USER_ID", "")).strip()
+    if not args.dry_run and not user_id:
+        print(
+            "SNYK_USER_ID is required (or pass --user-id) for live project settings PATCH.",
+            file=sys.stderr,
+        )
+        return 2
+
     client = SnykRestClient(settings)
-    report = run_post_import_cleanup(client, dry_run=args.dry_run)
+    report = run_post_import_cleanup(client, user_id=user_id, dry_run=args.dry_run)
 
     if args.dry_run:
         print(json.dumps(report, indent=2, ensure_ascii=False))
