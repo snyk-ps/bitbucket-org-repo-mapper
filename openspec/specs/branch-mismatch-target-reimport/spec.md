@@ -1,8 +1,11 @@
 # branch-mismatch-target-reimport Specification
 
 ## Purpose
-TBD - created by archiving change branch-mismatch-target-reimport. Update Purpose after archive.
+
+Operational branch remediation: delete mismatched Snyk targets and reimport with the correct production branch via `snyk-api-import`, driven by a pre-built `diff.json` artifact.
+
 ## Requirements
+
 ### Requirement: Accept diff.json input format
 
 The script SHALL accept a JSON array where each element contains `apm_code`, `repository_name`, `production_branch`, and `target_reference` as non-empty strings.
@@ -34,7 +37,7 @@ The script SHALL resolve `org_id` by matching `apm_code` to the Snyk organizatio
 
 ### Requirement: Match target by repository_name and target_reference
 
-For each entry, the script SHALL find exactly one Snyk target in the resolved org where `display_name` equals `repository_name` and `target_reference` equals `target_reference` (case-sensitive).
+For each entry, the script SHALL list all targets in the resolved org via `GET /rest/orgs/{org_id}/targets` with query parameter `exclude_empty=false`, SHALL NOT rely on a server-side `display_name` filter for matching, and SHALL find exactly one target where `attributes.display_name` equals `repository_name` and `attributes.target_reference` equals `target_reference` (case-sensitive), matching client-side against the full paginated list.
 
 #### Scenario: Single matching target found
 
@@ -44,7 +47,7 @@ For each entry, the script SHALL find exactly one Snyk target in the resolved or
 #### Scenario: No matching target
 
 - **WHEN** zero targets match
-- **THEN** the entry is recorded under `not_found`
+- **THEN** the entry is recorded under `not_found` with reason `target_not_found`
 
 #### Scenario: Ambiguous match
 
@@ -56,6 +59,31 @@ For each entry, the script SHALL find exactly one Snyk target in the resolved or
 
 - **WHEN** `production_branch` equals `target_reference`
 - **THEN** the entry is recorded under `skipped` with reason `already_correct`
+
+#### Scenario: Same display name different branch
+
+- **WHEN** zero targets match `target_reference`
+- **AND** one or more targets share `repository_name` on other branches
+- **THEN** the `not_found` entry includes `same_display_name_branches` listing those branch values
+
+### Requirement: Diff target_reference provenance
+
+The `target_reference` field in `diff.json` SHALL reflect the current branch on the Snyk **target** resource (`attributes.target_reference`), not project-level `target_reference` alone, so it matches the reimport lookup key.
+
+#### Scenario: Diff builder uses target branch
+
+- **WHEN** `lookup_target_reference.py` (or equivalent diff producer) emits an entry for a Bitbucket Server target
+- **THEN** `target_reference` is read from the target resource `attributes.target_reference`
+
+### Requirement: Actionable target_not_found diagnostics
+
+When an entry is recorded under `not_found` with reason `target_not_found`, the report entry SHALL include `candidates_returned` (count of targets listed for the org) and MAY include `same_display_name_branches` and `near_match_display_names` to aid operator triage.
+
+#### Scenario: Diagnostics on failed lookup
+
+- **WHEN** no target matches `repository_name` and `target_reference`
+- **THEN** the `not_found` entry includes `reason: target_not_found` and `candidates_returned`
+- **AND** when applicable includes `same_display_name_branches` or `near_match_display_names`
 
 ### Requirement: Delete matched target via REST API
 
@@ -107,4 +135,3 @@ The script SHALL require `SNYK_TOKEN` and `SNYK_GROUP_ID`.
 
 - **WHEN** required environment variables are unset
 - **THEN** the script exits with a validation error before processing
-
