@@ -444,55 +444,62 @@ PYTHONPATH=src python src/main.py snyk-post-import-cleanup \
 
 ## Scripts
 
-### Branch mismatch reimport (`scripts/reimport_mismatched_targets.py`)
+### Branch mismatch remediation (Scotia-style)
 
-Operational script for Scotia-style branch remediation: reads a `diff.json` artifact (output of a Bitbucket-vs-Snyk branch comparison), deletes each mismatched Snyk target, and reimports it with the correct `production_branch` via [`snyk-api-import`](https://docs.snyk.io/developer-tools/snyk-apps/tool-snyk-api-import).
+Operational workflow when Snyk targets were imported on the wrong branch. Use the **split scripts** on single-tenant Snyk (e.g. Scotia UAT): the Targets API often omits `attributes.target_reference`; branch comes from the **Projects API** instead.
 
-Each diff entry requires `apm_code` (Snyk org name), `repository_name` (target **display name** from the Snyk Targets API, e.g. `BB/my-service`), `production_branch` (desired branch after reimport), and `target_reference` (current branch on the **target** resource — must match `attributes.target_reference` exactly).
+**Operator flow:**
 
-**Diff field provenance:** Generate `diff.json` with [`scripts/lookup_target_reference.py`](scripts/lookup_target_reference.py) (or equivalent). That script lists Bitbucket Server targets per org and sets `target_reference` from the **target** resource (`attributes.target_reference`), not from project attributes alone. Using project-level `target_reference` in the diff causes false `target_not_found` when project and target disagree (seen on Scotia single-tenant UAT). Merge with your security.yaml comparison to add `production_branch`.
+1. Build `output.json` with [`scripts/lookup_target_reference.py`](scripts/lookup_target_reference.py) (branch from Projects API + `display_name` from Targets API).
+2. Build `diff.json` with [`scripts/branch_diff.py`](scripts/branch_diff.py) (compare discovery `production_branch` vs Snyk branch).
+3. **Delete** — [`scripts/delete_mismatched_targets.py`](scripts/delete_mismatched_targets.py) (match by `repository_name` / target `display_name` only; writes optional manifest).
+4. **Generate import batches** — [`scripts/generate_branch_reimport_targets.py`](scripts/generate_branch_reimport_targets.py) (from delete manifest).
+5. **Reimport** — [`snyk-api-import`](https://docs.snyk.io/developer-tools/snyk-apps/tool-snyk-api-import) `import --file=branch-reimport-batch-001.json`.
 
-Target lookup lists **all** targets in the org via REST (`GET /rest/orgs/{org_id}/targets?exclude_empty=false`) and matches client-side on `display_name` + `target_reference`. Empty targets (no projects) are included; the API omits them by default without `exclude_empty=false`.
+Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and `target_reference`. `target_reference` is used when **building** the diff (Projects API branch vs YAML); it is **not** used to locate targets for delete.
 
-**Destructive** — deletes targets and all associated projects before reimport. Run `--dry-run` in UAT first.
+**Diff field provenance:** [`lookup_target_reference.py`](scripts/lookup_target_reference.py) sets `target_reference` from **project** `attributes.target_reference` (bitbucket-server), joined to target `display_name` by target id. Do not use Targets API `attributes.target_reference` on single-tenant — it is often `None`.
+
+**Destructive** — delete removes targets and all associated projects. Run `--dry-run` in UAT first.
+
+#### Delete (`scripts/delete_mismatched_targets.py`)
 
 | Variable / flag | Required | Description |
 |-----------------|----------|-------------|
 | `SNYK_TOKEN` | Yes | Snyk API token. |
 | `SNYK_GROUP_ID` | Yes | Group UUID for org name → id resolution. |
 | `--input PATH` | Yes | `diff.json` array file. |
-| `--output PATH` | No | Report JSON (default: `branch-reimport-report.json`). |
-| `--dry-run` | No | Match targets only; no DELETE or import. |
-| `--skip-import` | No | Delete only; skip `snyk-api-import`. |
-| `--repos-per-batch N` | No | Targets per import batch file (default: `50`). |
+| `--output PATH` | No | Delete report (default: `branch-delete-report.json`). |
+| `--manifest PATH` | No | Write reimport manifest after successful deletes. |
+| `--dry-run` | No | Match only; no DELETE. |
 | `--limit N` | No | Process first N entries (UAT smoke tests). |
-| `--snyk-api-import-cmd CMD` | No | Default `snyk-api-import`; use `npx snyk-api-import` if not global. |
-| `--import-batch-dir PATH` | No | Directory for batch JSON and `snyk-api-import` cwd (default: `.`). |
+
+#### Generate import batches (`scripts/generate_branch_reimport_targets.py`)
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--manifest PATH` | Yes | Delete manifest from step 3. |
+| `--output-dir PATH` | No | Batch JSON directory (default: `.`). |
+| `--repos-per-batch N` | No | Targets per file (default: `50`). |
+
+#### Legacy monolithic script (`scripts/reimport_mismatched_targets.py`)
+
+**Deprecated** on single-tenant — matches delete on Targets API `target_reference`, which is often absent. Prefer the split flow above.
 
 **Operational notes:**
 
-- Install `snyk-api-import` globally or pass `--snyk-api-import-cmd 'npx snyk-api-import'`.
-- Do **not** delete or move `imported-targets.log` while an import is running — doing so causes skipped imports and 404 errors.
-- Custom branching must be enabled in the target Snyk environment before reimport.
-- Empty-target cleanup after import is handled separately in Snyk (not by this script).
-- On single-tenant Snyk, set `SNYK_API` to your tenant API origin (not `https://api.snyk.io`).
+- Install `snyk-api-import` globally or use `npx snyk-api-import`.
+- Do **not** delete or move `imported-targets.log` while an import is running.
+- Custom branching must be enabled before reimport.
+- Set `SNYK_API` to your tenant API origin on single-tenant (not `https://api.snyk.io`).
 
-**Report diagnostics (`target_not_found`):**
+**UAT re-test checklist:**
 
-When a target is not matched, the report includes:
-
-| Field | Meaning |
-|-------|---------|
-| `candidates_returned` | Targets returned for the org (after `exclude_empty=false`) |
-| `same_display_name_branches` | Branches seen on targets whose `display_name` matches `repository_name` but `target_reference` differed — diff may be stale |
-| `near_match_display_names` | Other target display names containing the repo slug — `repository_name` in diff may be wrong |
-
-**UAT re-test checklist (Scotia-style):**
-
-1. Regenerate `diff.json` with `lookup_target_reference.py` using tenant `SNYK_API` and `SNYK_TOKEN`.
-2. Dry-run reimport on a known mismatch, e.g. `BB/uat-bitbucket-java-sample` with `--limit 5`; confirm match or actionable diagnostics (not silent `target_not_found`).
-3. Live reimport on 1–2 repos; verify Snyk target `target_reference` equals `production_branch` after import.
-4. Stage 4: set `SNYK_USER_ID`, run `--dry-run`, then live on one org; confirm recurring-test PATCH succeeds (dry-run skips PATCH — live run validates owner `user_id`).
+1. Regenerate `output.json` / `diff.json` with `lookup_target_reference.py` (`SNYK_API`, `SNYK_TOKEN`).
+2. Delete dry-run: `delete_mismatched_targets.py --input diff.json --dry-run --limit 5`.
+3. Live delete on 1–2 repos with `--manifest delete-manifest.json`.
+4. `generate_branch_reimport_targets.py --manifest delete-manifest.json`.
+5. `snyk-api-import import --file=branch-reimport-batch-001.json`; verify branch equals `production_branch`.
 
 UAT dry-run example:
 
@@ -500,21 +507,27 @@ UAT dry-run example:
 export SNYK_TOKEN='your-token'
 export SNYK_GROUP_ID='your-group-uuid'
 
-PYTHONPATH=src python scripts/reimport_mismatched_targets.py \
+PYTHONPATH=src python scripts/delete_mismatched_targets.py \
   --input diff.json \
   --dry-run \
   --limit 5 \
   --env-file .env
 ```
 
-Live run (after UAT validation):
+Live delete + manifest + generate batches:
 
 ```bash
-PYTHONPATH=src python scripts/reimport_mismatched_targets.py \
+PYTHONPATH=src python scripts/delete_mismatched_targets.py \
   --input diff.json \
-  --output branch-reimport-report.json \
-  --repos-per-batch 50 \
+  --manifest delete-manifest.json \
+  --output branch-delete-report.json \
   --env-file .env
+
+PYTHONPATH=src python scripts/generate_branch_reimport_targets.py \
+  --manifest delete-manifest.json \
+  --output-dir .
+
+snyk-api-import import --file=branch-reimport-batch-001.json
 ```
 
 ## Testing

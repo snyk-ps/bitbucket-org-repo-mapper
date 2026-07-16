@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """Delete and reimport Snyk targets with mismatched branch references.
 
+.. deprecated::
+   Prefer the split workflow on single-tenant Snyk (Scotia UAT):
+
+   1. ``scripts/delete_mismatched_targets.py`` — delete by display name + manifest
+   2. ``scripts/generate_branch_reimport_targets.py`` — build import batch JSON
+   3. ``snyk-api-import import --file=...``
+
+   This monolithic script matches on Targets API ``target_reference``, which is
+   often absent on single-tenant; use the split scripts instead.
+
 Reads a diff.json artifact (apm_code, repository_name, production_branch,
 target_reference), deletes each mismatched target, and reimports via snyk-api-import.
 

@@ -1,7 +1,8 @@
-"""Build diff.json input for branch mismatch reimport from Snyk REST APIs.
+"""Build output.json for branch diff from Snyk REST APIs.
 
-Each output entry uses target.attributes.target_reference (not project-level
-target_reference) so values match reimport_mismatched_targets lookup keys.
+Branch (``target_reference``) comes from the **Projects API**
+(``attributes.target_reference`` on bitbucket-server projects). On single-tenant
+Snyk the Targets API often omits ``attributes.target_reference``; do not rely on it.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ HEADERS = {
 }
 
 
-def _target_reference(attrs: dict[str, object]) -> str | None:
+def _branch_from_project_attrs(attrs: dict[str, object]) -> str | None:
     for key in ("target_reference", "targetReference", "branch"):
         raw = attrs.get(key)
         if isinstance(raw, str) and raw.strip():
@@ -72,7 +73,7 @@ while orgs_url:
 
         print(f"Processing org: {org_name}")
 
-        bitbucket_target_ids: set[str] = set()
+        target_branch_by_id: dict[str, str] = {}
 
         projects_url = (
             f"{BASE_URL}/rest/orgs/{org_id}/projects"
@@ -94,6 +95,9 @@ while orgs_url:
                         continue
                     if project_attrs.get("origin") != "bitbucket-server":
                         continue
+                    branch = _branch_from_project_attrs(project_attrs)
+                    if branch is None:
+                        continue
                     rel = project.get("relationships")
                     if not isinstance(rel, dict):
                         continue
@@ -104,8 +108,11 @@ while orgs_url:
                     if not isinstance(target_data, dict):
                         continue
                     target_id = target_data.get("id")
-                    if isinstance(target_id, str) and target_id.strip():
-                        bitbucket_target_ids.add(target_id.strip())
+                    if not isinstance(target_id, str) or not target_id.strip():
+                        continue
+                    tid = target_id.strip()
+                    if tid not in target_branch_by_id:
+                        target_branch_by_id[tid] = branch
                 except (KeyError, TypeError):
                     continue
 
@@ -117,7 +124,7 @@ while orgs_url:
                     next_link = raw
             projects_url = urljoin(BASE_URL, next_link) if next_link else None
 
-        print(f"  Found {len(bitbucket_target_ids)} Bitbucket Server targets")
+        print(f"  Found {len(target_branch_by_id)} Bitbucket Server target branches")
 
         targets_url = (
             f"{BASE_URL}/rest/orgs/{org_id}/targets"
@@ -134,14 +141,16 @@ while orgs_url:
                 if not isinstance(target, dict):
                     continue
                 target_id = target.get("id")
-                if not isinstance(target_id, str) or target_id not in bitbucket_target_ids:
+                if not isinstance(target_id, str):
+                    continue
+                branch = target_branch_by_id.get(target_id.strip())
+                if branch is None:
                     continue
                 target_attrs = target.get("attributes")
                 if not isinstance(target_attrs, dict):
                     continue
                 display_name = target_attrs.get("display_name")
-                branch = _target_reference(target_attrs)
-                if not isinstance(display_name, str) or branch is None:
+                if not isinstance(display_name, str):
                     continue
                 results.append(
                     {

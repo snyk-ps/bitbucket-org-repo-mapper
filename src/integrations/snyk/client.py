@@ -86,6 +86,62 @@ def normalize_v1_projects_payload(parsed: Any) -> list[dict[str, Any]]:
     raise RuntimeError(msg)
 
 
+def _rest_attr_str(attrs: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        raw = attrs.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def target_branch_from_rest_project_item(
+    item: dict[str, Any],
+    *,
+    origin: str = "bitbucket-server",
+) -> tuple[str, str] | None:
+    """Return ``(target_id, target_reference)`` from a REST project resource."""
+    attrs = item.get("attributes")
+    if not isinstance(attrs, dict):
+        return None
+    if _rest_attr_str(attrs, "origin") != origin:
+        return None
+    branch = _rest_attr_str(attrs, "target_reference", "targetReference", "branch")
+    if branch is None:
+        return None
+    rel = item.get("relationships")
+    if not isinstance(rel, dict):
+        return None
+    target_rel = rel.get("target")
+    if not isinstance(target_rel, dict):
+        return None
+    data = target_rel.get("data")
+    if not isinstance(data, dict):
+        return None
+    raw_id = data.get("id")
+    if not isinstance(raw_id, str) or not raw_id.strip():
+        return None
+    return raw_id.strip(), branch
+
+
+def build_project_target_branch_index(
+    items: list[dict[str, Any]],
+    *,
+    origin: str = "bitbucket-server",
+) -> dict[str, str]:
+    """Map target id to branch reference from REST project list items (first wins)."""
+    out: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        pair = target_branch_from_rest_project_item(item, origin=origin)
+        if pair is None:
+            continue
+        target_id, branch = pair
+        if target_id not in out:
+            out[target_id] = branch
+    return out
+
+
 def normalize_rest_project(item: dict[str, Any]) -> dict[str, Any] | None:
     """Turn a REST project resource into a flat project dict (id, name, type)."""
     pid = item.get("id")
@@ -381,6 +437,45 @@ class SnykRestClient:
                     ):
                         continue
                 out.append(project)
+            links = payload.get("links")
+            next_link = None
+            if isinstance(links, dict):
+                raw_next = links.get("next")
+                if isinstance(raw_next, str):
+                    next_link = raw_next
+            url = _resolve_next_url(s.rest_root, next_link)
+        return out
+
+    def build_org_project_target_branch_index(
+        self,
+        org_id: str,
+        *,
+        origin: str = "bitbucket-server",
+    ) -> dict[str, str]:
+        """Map target id to ``target_reference`` from REST org projects."""
+        s = self._settings
+        oid = org_id.strip()
+        origin_filter = origin.strip()
+        base_path = f"{s.rest_root}/orgs/{oid}/projects"
+        sep = "&" if "?" in base_path else "?"
+        first = f"{base_path}{sep}version={s.api_version}&limit=100"
+        out: dict[str, str] = {}
+        url: str | None = first
+        seen_urls: set[str] = set()
+        while url:
+            if url in seen_urls:
+                msg = "Snyk API pagination loop detected for org projects"
+                raise RuntimeError(msg)
+            seen_urls.add(url)
+            payload = self._request_rest_json_object(url)
+            data = payload.get("data")
+            if not isinstance(data, list):
+                msg = "Unexpected org projects response: missing data array"
+                raise RuntimeError(msg)
+            page_index = build_project_target_branch_index(data, origin=origin_filter)
+            for target_id, branch in page_index.items():
+                if target_id not in out:
+                    out[target_id] = branch
             links = payload.get("links")
             next_link = None
             if isinstance(links, dict):
