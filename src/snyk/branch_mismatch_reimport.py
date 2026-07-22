@@ -10,8 +10,10 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
+from common.discovery_document import load_rows_from_stage1_file
+from common.output_state import row_repo_key
 from integrations.snyk.client import SnykRestClient
 from snyk.enrichment import build_name_to_org_id
 from snyk.outputs import APP_TYPE_PREFIX, batch_import_output_paths
@@ -120,6 +122,84 @@ def target_project_key_and_slug(target: dict[str, Any]) -> tuple[str, str] | Non
         if tail and project_key:
             return project_key, tail
     return None
+
+
+CoordinateSource = Literal["target", "discovery"]
+
+DiscoveryCoordinateIndex = dict[str, list[tuple[str | None, str, str]]]
+
+
+@dataclass(frozen=True)
+class CoordinateResolution:
+    """Resolved Bitbucket projectKey/repoSlug for reimport."""
+
+    project_key: str
+    repo_slug: str
+    coordinate_source: CoordinateSource
+
+
+def load_discovery_coordinate_index(path: Path) -> DiscoveryCoordinateIndex:
+    """Build repository_name → [(apm_code, project_key, repo_slug), ...] from discovery."""
+    rows, _source = load_rows_from_stage1_file(path)
+    index: DiscoveryCoordinateIndex = {}
+    for row in rows:
+        raw_name = row.get("repository_name")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            continue
+        repo_key = row_repo_key(row)
+        if repo_key is None:
+            continue
+        project_key, repo_slug = repo_key
+        raw_apm = row.get("apm_code")
+        apm_code = raw_apm.strip() if isinstance(raw_apm, str) and raw_apm.strip() else None
+        name = raw_name.strip()
+        index.setdefault(name, []).append((apm_code, project_key, repo_slug))
+    return index
+
+
+def _lookup_discovery_coordinates(
+    index: DiscoveryCoordinateIndex,
+    entry: DiffEntry,
+) -> tuple[str, str]:
+    candidates = index.get(entry.repository_name, [])
+    if not candidates:
+        msg = f"discovery_not_found for repository_name={entry.repository_name!r}"
+        raise ValueError(msg)
+    if len(candidates) == 1:
+        return candidates[0][1], candidates[0][2]
+    by_apm = [c for c in candidates if c[0] == entry.apm_code]
+    if len(by_apm) == 1:
+        return by_apm[0][1], by_apm[0][2]
+    if not by_apm:
+        msg = f"discovery_not_found for repository_name={entry.repository_name!r}"
+        raise ValueError(msg)
+    msg = f"ambiguous_discovery for repository_name={entry.repository_name!r}"
+    raise ValueError(msg)
+
+
+def resolve_reimport_coordinates(
+    target_detail: dict[str, Any],
+    entry: DiffEntry,
+    discovery_index: DiscoveryCoordinateIndex | None = None,
+) -> CoordinateResolution:
+    """Resolve projectKey/repoSlug from target GET, falling back to discovery index."""
+    repo_keys = target_project_key_and_slug(target_detail)
+    if repo_keys is not None:
+        project_key, repo_slug = repo_keys
+        return CoordinateResolution(
+            project_key=project_key,
+            repo_slug=repo_slug,
+            coordinate_source="target",
+        )
+    if discovery_index is None:
+        msg = "target missing projectKey/repoSlug; pass --discovery discovery.json"
+        raise ValueError(msg)
+    project_key, repo_slug = _lookup_discovery_coordinates(discovery_index, entry)
+    return CoordinateResolution(
+        project_key=project_key,
+        repo_slug=repo_slug,
+        coordinate_source="discovery",
+    )
 
 
 def import_target_name(repository_name: str) -> str:

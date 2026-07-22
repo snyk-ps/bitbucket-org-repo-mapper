@@ -68,6 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write reimport manifest JSON after successful deletes.",
     )
+    parser.add_argument(
+        "--discovery",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Stage 1 discovery.json for projectKey/repoSlug when target GET omits them "
+            "(common on single-tenant)."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     parser.add_argument("--delay-ms", type=int, default=0, metavar="MS")
@@ -95,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         assert_safe_filesystem_path(args.output)
         if args.manifest is not None:
             assert_safe_filesystem_path(args.manifest)
+        if args.discovery is not None:
+            assert_safe_filesystem_path(args.discovery)
         entries = load_diff_entries(args.input)
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
@@ -105,6 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         limit=args.limit,
         delay_ms=args.delay_ms,
         manifest_path=args.manifest,
+        discovery_path=args.discovery,
     )
 
     client = SnykRestClient(settings)

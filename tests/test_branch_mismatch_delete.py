@@ -148,3 +148,83 @@ def test_load_delete_manifest_rejects_invalid(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="org_id"):
         load_delete_manifest(path)
+
+
+def _st_target_detail() -> dict[str, object]:
+    """Single-tenant shape: integration present, projectKey/repoSlug absent."""
+    return {
+        "id": "tgt-1",
+        "attributes": {"display_name": "BB/uat-bitbucket-java-sample"},
+        "relationships": {"integration": {"data": {"id": "int-1"}}},
+    }
+
+
+def test_run_branch_mismatch_delete_fails_without_discovery_on_st_target() -> None:
+    entry = DiffEntry(
+        apm_code="ABCD",
+        repository_name="BB/uat-bitbucket-java-sample",
+        production_branch="master",
+        target_reference="snyk-pr-scan-test",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ABCD"}]
+    client.iter_org_targets.return_value = [_target(display_name="BB/uat-bitbucket-java-sample")]
+    client.get_org_target.return_value = _st_target_detail()
+
+    report = run_branch_mismatch_delete(client, [entry], BranchMismatchDeleteOptions())
+
+    assert len(report["failed"]) == 1
+    assert "pass --discovery" in report["failed"][0]["error"]
+    client.delete_org_target.assert_not_called()
+
+
+def test_run_branch_mismatch_delete_discovery_fallback(tmp_path: Path) -> None:
+    entry = DiffEntry(
+        apm_code="ABCD",
+        repository_name="BB/uat-bitbucket-java-sample",
+        production_branch="master",
+        target_reference="snyk-pr-scan-test",
+    )
+    discovery_path = tmp_path / "discovery.json"
+    discovery_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source": "bitbucket",
+                "rows": [
+                    {
+                        "repository_path": "UATPROJ/uat-bitbucket-java-sample",
+                        "repository_name": "BB/uat-bitbucket-java-sample",
+                        "apm_code": "ABCD",
+                        "production_branch": "master",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ABCD"}]
+    client.iter_org_targets.return_value = [_target(display_name="BB/uat-bitbucket-java-sample")]
+    client.get_org_target.return_value = _st_target_detail()
+    manifest_path = tmp_path / "manifest.json"
+
+    report = run_branch_mismatch_delete(
+        client,
+        [entry],
+        BranchMismatchDeleteOptions(
+            manifest_path=manifest_path,
+            discovery_path=discovery_path,
+        ),
+    )
+
+    assert len(report["deleted"]) == 1
+    assert report["deleted"][0]["coordinate_source"] == "discovery"
+    client.delete_org_target.assert_called_once_with("org-1", "tgt-1")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    row = manifest["entries"][0]
+    assert row["project_key"] == "UATPROJ"
+    assert row["repo_slug"] == "uat-bitbucket-java-sample"
+    assert row["coordinate_source"] == "discovery"

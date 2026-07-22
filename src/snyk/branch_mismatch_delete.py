@@ -11,11 +11,13 @@ from typing import Any
 from integrations.snyk.client import SnykRestClient
 from snyk.branch_mismatch_reimport import (
     DiffEntry,
+    DiscoveryCoordinateIndex,
     _entry_record,
     _repo_slug_from_repository_name,
+    load_discovery_coordinate_index,
+    resolve_reimport_coordinates,
     target_display_name,
     target_integration_id,
-    target_project_key_and_slug,
 )
 from snyk.enrichment import build_name_to_org_id
 
@@ -42,6 +44,7 @@ class BranchMismatchDeleteOptions:
     limit: int | None = None
     delay_ms: int = 0
     manifest_path: Path | None = None
+    discovery_path: Path | None = None
 
 
 def _empty_delete_buckets() -> dict[str, list[dict[str, Any]]]:
@@ -93,8 +96,9 @@ def _manifest_entry(
     integration_id: str,
     project_key: str,
     repo_slug: str,
+    coordinate_source: str | None = None,
 ) -> dict[str, str]:
-    return {
+    row = {
         "apm_code": entry.apm_code,
         "org_id": org_id,
         "target_id": target_id,
@@ -104,6 +108,9 @@ def _manifest_entry(
         "repository_name": entry.repository_name,
         "production_branch": entry.production_branch,
     }
+    if coordinate_source is not None:
+        row["coordinate_source"] = coordinate_source
+    return row
 
 
 def load_delete_manifest(path: Path) -> list[dict[str, str]]:
@@ -148,6 +155,9 @@ def run_branch_mismatch_delete(
     buckets = _empty_delete_buckets()
     manifest_entries: list[dict[str, str]] = []
     org_targets_cache: dict[str, list[dict[str, Any]]] = {}
+    discovery_index: DiscoveryCoordinateIndex | None = None
+    if options.discovery_path is not None:
+        discovery_index = load_discovery_coordinate_index(options.discovery_path)
 
     def targets_for_org(org_id: str) -> list[dict[str, Any]]:
         if org_id not in org_targets_cache:
@@ -220,27 +230,29 @@ def run_branch_mismatch_delete(
         try:
             detail = client.get_org_target(org_id, target_id)
             integration_id = target_integration_id(detail)
-            repo_keys = target_project_key_and_slug(detail)
             if integration_id is None:
                 msg = "target missing integration id"
                 raise ValueError(msg)
-            if repo_keys is None:
-                msg = "target missing projectKey/repoSlug"
-                raise ValueError(msg)
-            project_key, repo_slug = repo_keys
+            coords = resolve_reimport_coordinates(detail, entry, discovery_index)
             manifest_entries.append(
                 _manifest_entry(
                     entry,
                     org_id=org_id,
                     target_id=target_id,
                     integration_id=integration_id,
-                    project_key=project_key,
-                    repo_slug=repo_slug,
+                    project_key=coords.project_key,
+                    repo_slug=coords.repo_slug,
+                    coordinate_source=coords.coordinate_source,
                 ),
             )
             client.delete_org_target(org_id, target_id)
             buckets["deleted"].append(
-                _entry_record(entry, org_id=org_id, target_id=target_id),
+                _entry_record(
+                    entry,
+                    org_id=org_id,
+                    target_id=target_id,
+                    coordinate_source=coords.coordinate_source,
+                ),
             )
         except (RuntimeError, ValueError) as exc:
             buckets["failed"].append(

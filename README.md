@@ -460,6 +460,8 @@ Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and
 
 **Diff field provenance:** [`lookup_target_reference.py`](scripts/lookup_target_reference.py) sets `target_reference` from **project** `attributes.target_reference` (bitbucket-server), joined to target `display_name` by target id. Do not use Targets API `attributes.target_reference` on single-tenant — it is often `None`.
 
+On single-tenant, target GET also omits `projectKey` / `repoSlug`. Pass Stage 1 **`discovery.json`** to the delete script via `--discovery` so the reimport manifest can be built from `repository_path`.
+
 **Destructive** — delete removes targets and all associated projects. Run `--dry-run` in UAT first.
 
 #### Delete (`scripts/delete_mismatched_targets.py`)
@@ -471,6 +473,7 @@ Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and
 | `--input PATH` | Yes | `diff.json` array file. |
 | `--output PATH` | No | Delete report (default: `branch-delete-report.json`). |
 | `--manifest PATH` | No | Write reimport manifest after successful deletes. |
+| `--discovery PATH` | No | Stage 1 `discovery.json` for `projectKey`/`repoSlug` when target GET omits them (single-tenant). |
 | `--dry-run` | No | Match only; no DELETE. |
 | `--limit N` | No | Process first N entries (UAT smoke tests). |
 
@@ -496,8 +499,8 @@ Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and
 **UAT re-test checklist:**
 
 1. Regenerate `output.json` / `diff.json` with `lookup_target_reference.py` (`SNYK_API`, `SNYK_TOKEN`).
-2. Delete dry-run: `delete_mismatched_targets.py --input diff.json --dry-run --limit 5`.
-3. Live delete on 1–2 repos with `--manifest delete-manifest.json`.
+2. Delete dry-run: `delete_mismatched_targets.py --input diff.json --dry-run --limit 5 --discovery discovery.json`.
+3. Live delete on 1–2 repos (e.g. `BB/uat-bitbucket-java-sample`) with `--manifest delete-manifest.json --discovery discovery.json`.
 4. `generate_branch_reimport_targets.py --manifest delete-manifest.json`.
 5. `snyk-api-import import --file=branch-reimport-batch-001.json`; verify branch equals `production_branch`.
 
@@ -520,6 +523,7 @@ Live delete + manifest + generate batches:
 PYTHONPATH=src python scripts/delete_mismatched_targets.py \
   --input diff.json \
   --manifest delete-manifest.json \
+  --discovery discovery.json \
   --output branch-delete-report.json \
   --env-file .env
 
