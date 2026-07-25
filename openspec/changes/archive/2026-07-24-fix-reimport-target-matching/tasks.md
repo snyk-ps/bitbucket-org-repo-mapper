@@ -38,4 +38,4 @@
 ## 7. Verification
 
 - [x] 7.1 Run `pytest tests/test_branch_mismatch_reimport.py tests/test_branch_mismatch_coordinates.py tests/test_branch_mismatch_delete.py`
-- [ ] 7.2 Manual dry-run against cloud test org: `--integration-type bitbucket-cloud --dry-run --limit 5 --input data/diff.json`
+- [x] 7.2 Manual dry-run against cloud test org: `--integration-type bitbucket-cloud --dry-run --limit 5 --input data/diff.json`
