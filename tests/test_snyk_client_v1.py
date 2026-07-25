@@ -7,6 +7,7 @@ import pytest
 from integrations.snyk.client import (
     normalize_v1_integrations_payload,
     pick_bitbucket_server_integration_id,
+    pick_integration_id,
 )
 
 
@@ -68,6 +69,17 @@ def test_normalize_v1_integrations_payload_empty_object() -> None:
 def test_normalize_v1_integrations_payload_invalid() -> None:
     with pytest.raises(RuntimeError, match="Unexpected v1"):
         normalize_v1_integrations_payload("nope")
+
+
+def test_pick_integration_id_bitbucket_cloud() -> None:
+    out = pick_integration_id(
+        [
+            {"id": "int-server", "type": "bitbucket-server"},
+            {"id": "int-cloud", "type": "bitbucket-cloud"},
+        ],
+        "bitbucket-cloud",
+    )
+    assert out == "int-cloud"
 
 
 def test_pick_bitbucket_server_integration_id_v1_flat() -> None:

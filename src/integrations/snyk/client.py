@@ -762,23 +762,32 @@ class SnykRestClient:
         return items
 
 
-def pick_bitbucket_server_integration_id(integrations: list[dict[str, Any]]) -> str:
-    """Return integration id for Bitbucket Server, or raise."""
+def pick_integration_id(integrations: list[dict[str, Any]], integration_type: str) -> str:
+    """Return integration id for the given type slug (e.g. bitbucket-server), or raise."""
+    want = integration_type.strip().lower().replace("_", "-")
     matches: list[str] = []
     for item in integrations:
         iid = item.get("id")
         if not isinstance(iid, str) or not iid.strip():
             continue
         itype = _integration_type_slug(item)
-        if itype == "bitbucket-server":
+        if itype == want:
             matches.append(iid.strip())
     if not matches:
-        msg = "No bitbucket-server integration found for this organization"
+        msg = f"No {integration_type} integration found for this organization"
         raise ValueError(msg)
     if len(matches) > 1:
-        msg = "Multiple bitbucket-server integrations found; disambiguation is not implemented"
+        msg = (
+            f"Multiple {integration_type} integrations found; "
+            "disambiguation is not implemented"
+        )
         raise ValueError(msg)
     return matches[0]
+
+
+def pick_bitbucket_server_integration_id(integrations: list[dict[str, Any]]) -> str:
+    """Return integration id for Bitbucket Server, or raise."""
+    return pick_integration_id(integrations, "bitbucket-server")
 
 
 def _integration_type_slug(item: dict[str, Any]) -> str | None:

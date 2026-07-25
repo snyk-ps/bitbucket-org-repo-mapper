@@ -14,7 +14,7 @@ from typing import Any, Callable, Literal
 
 from common.discovery_document import load_rows_from_stage1_file
 from common.output_state import row_repo_key
-from integrations.snyk.client import SnykRestClient
+from integrations.snyk.client import SnykRestClient, pick_integration_id
 from snyk.enrichment import build_name_to_org_id
 from snyk.outputs import APP_TYPE_PREFIX, batch_import_output_paths
 
@@ -45,6 +45,8 @@ class BranchMismatchReimportOptions:
     snyk_api_import_cmd: str = "snyk-api-import"
     import_batch_dir: Path | None = None
     delay_ms: int = 0
+    integration_type: str = "bitbucket-server"
+    discovery_path: Path | None = None
 
 
 def load_diff_entries(path: Path) -> list[DiffEntry]:
@@ -139,12 +141,12 @@ class CoordinateResolution:
 
 
 def load_discovery_coordinate_index(path: Path) -> DiscoveryCoordinateIndex:
-    """Build repository_name → [(apm_code, project_key, repo_slug), ...] from discovery."""
+    """Build repository_path → [(apm_code, project_key, repo_slug), ...] from discovery."""
     rows, _source = load_rows_from_stage1_file(path)
     index: DiscoveryCoordinateIndex = {}
     for row in rows:
-        raw_name = row.get("repository_name")
-        if not isinstance(raw_name, str) or not raw_name.strip():
+        raw_path = row.get("repository_path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
             continue
         repo_key = row_repo_key(row)
         if repo_key is None:
@@ -152,8 +154,8 @@ def load_discovery_coordinate_index(path: Path) -> DiscoveryCoordinateIndex:
         project_key, repo_slug = repo_key
         raw_apm = row.get("apm_code")
         apm_code = raw_apm.strip() if isinstance(raw_apm, str) and raw_apm.strip() else None
-        name = raw_name.strip()
-        index.setdefault(name, []).append((apm_code, project_key, repo_slug))
+        path_key = raw_path.strip()
+        index.setdefault(path_key, []).append((apm_code, project_key, repo_slug))
     return index
 
 
@@ -251,42 +253,43 @@ def _repo_slug_from_repository_name(repository_name: str) -> str:
     return repository_name
 
 
-def _find_matching_targets(
+def find_targets_by_display_name(
     targets: list[dict[str, Any]],
     entry: DiffEntry,
+    *,
+    integration_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Match targets by diff ``repository_name`` == target ``display_name`` only."""
     matches: list[dict[str, Any]] = []
     for target in targets:
         display = target_display_name(target)
-        branch = target_branch_reference(target)
-        if display == entry.repository_name and branch == entry.target_reference:
-            matches.append(target)
+        if display != entry.repository_name:
+            continue
+        if integration_id is not None:
+            tid = target_integration_id(target)
+            if tid is not None and tid != integration_id:
+                continue
+        matches.append(target)
     return matches
 
 
-def _target_not_found_diagnostics(
+def target_not_found_diagnostics(
     targets: list[dict[str, Any]],
     entry: DiffEntry,
 ) -> dict[str, Any]:
-    """Build diagnostic fields when no target matches display_name + target_reference."""
-    same_name_branches: list[str] = []
+    """Build diagnostic fields when no target matches diff ``repository_name``."""
     near_match_names: list[str] = []
     slug = _repo_slug_from_repository_name(entry.repository_name)
     for target in targets:
         display = target_display_name(target)
         if display is None:
             continue
-        branch = target_branch_reference(target)
-        if display == entry.repository_name:
-            if branch is not None and branch not in same_name_branches:
-                same_name_branches.append(branch)
-        elif slug and slug in display and display not in near_match_names:
-            near_match_names.append(display)
+        if display != entry.repository_name and slug and slug in display:
+            if display not in near_match_names:
+                near_match_names.append(display)
     out: dict[str, Any] = {
         "candidates_returned": len(targets),
     }
-    if same_name_branches:
-        out["same_display_name_branches"] = same_name_branches
     if near_match_names:
         out["near_match_display_names"] = near_match_names
     return out
@@ -370,11 +373,24 @@ def run_branch_mismatch_reimport(
     buckets = _empty_report_buckets()
     import_queue: list[tuple[DiffEntry, dict[str, Any]]] = []
     org_targets_cache: dict[str, list[dict[str, Any]]] = {}
+    org_integration_cache: dict[str, str] = {}
+    discovery_index: DiscoveryCoordinateIndex | None = None
+    if options.discovery_path is not None:
+        discovery_index = load_discovery_coordinate_index(options.discovery_path)
 
     def targets_for_org(org_id: str) -> list[dict[str, Any]]:
         if org_id not in org_targets_cache:
             org_targets_cache[org_id] = client.iter_org_targets(org_id)
         return org_targets_cache[org_id]
+
+    def integration_id_for_org(org_id: str) -> str:
+        if org_id not in org_integration_cache:
+            integrations = client.iter_org_integrations(org_id)
+            org_integration_cache[org_id] = pick_integration_id(
+                integrations,
+                options.integration_type,
+            )
+        return org_integration_cache[org_id]
 
     for entry in entries:
         if entry.production_branch == entry.target_reference:
@@ -391,9 +407,19 @@ def run_branch_mismatch_reimport(
             continue
 
         try:
+            org_integration_id = integration_id_for_org(org_id)
             candidates = targets_for_org(org_id)
-            matches = _find_matching_targets(candidates, entry)
+            matches = find_targets_by_display_name(
+                candidates,
+                entry,
+                integration_id=org_integration_id,
+            )
         except RuntimeError as exc:
+            buckets["failed"].append(
+                _entry_record(entry, org_id=org_id, error=str(exc)),
+            )
+            continue
+        except ValueError as exc:
             buckets["failed"].append(
                 _entry_record(entry, org_id=org_id, error=str(exc)),
             )
@@ -405,7 +431,7 @@ def run_branch_mismatch_reimport(
                     entry,
                     org_id=org_id,
                     reason="target_not_found",
-                    **_target_not_found_diagnostics(candidates, entry),
+                    **target_not_found_diagnostics(candidates, entry),
                 ),
             )
             continue
@@ -442,26 +468,27 @@ def run_branch_mismatch_reimport(
         try:
             detail = client.get_org_target(org_id, target_id)
             integration_id = target_integration_id(detail)
-            repo_keys = target_project_key_and_slug(detail)
             if integration_id is None:
                 msg = "target missing integration id"
                 raise ValueError(msg)
-            if repo_keys is None:
-                msg = "target missing projectKey/repoSlug"
-                raise ValueError(msg)
-            project_key, repo_slug = repo_keys
+            coords = resolve_reimport_coordinates(detail, entry, discovery_index)
             client.delete_org_target(org_id, target_id)
             payload = build_import_payload(
                 org_id=org_id,
                 integration_id=integration_id,
-                project_key=project_key,
-                repo_slug=repo_slug,
+                project_key=coords.project_key,
+                repo_slug=coords.repo_slug,
                 repository_name=entry.repository_name,
                 production_branch=entry.production_branch,
             )
             import_queue.append((entry, payload))
             buckets["deleted"].append(
-                _entry_record(entry, org_id=org_id, target_id=target_id),
+                _entry_record(
+                    entry,
+                    org_id=org_id,
+                    target_id=target_id,
+                    coordinate_source=coords.coordinate_source,
+                ),
             )
         except (RuntimeError, ValueError) as exc:
             buckets["failed"].append(
@@ -563,6 +590,7 @@ def run_branch_mismatch_reimport(
         "group_id": client.group_id,
         "dry_run": options.dry_run,
         "skip_import": options.skip_import,
+        "integration_type": options.integration_type,
         "entries_processed": len(entries),
         "import_batches": import_batches,
         **buckets,

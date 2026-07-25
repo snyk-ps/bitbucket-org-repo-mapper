@@ -63,7 +63,7 @@ def test_run_branch_mismatch_delete_dry_run() -> None:
 
 
 def test_run_branch_mismatch_delete_matches_without_target_branch() -> None:
-    """Targets API may omit target_reference; match by display_name only."""
+    """Targets API does not expose branch; match by display_name only."""
     entry = DiffEntry(
         apm_code="ORG1",
         repository_name="BB/my-service",
@@ -151,7 +151,7 @@ def test_load_delete_manifest_rejects_invalid(tmp_path: Path) -> None:
 
 
 def _st_target_detail() -> dict[str, object]:
-    """Single-tenant shape: integration present, projectKey/repoSlug absent."""
+    """Target GET omits projectKey/repoSlug; coordinates come from discovery."""
     return {
         "id": "tgt-1",
         "attributes": {"display_name": "BB/uat-bitbucket-java-sample"},
@@ -182,7 +182,7 @@ def test_run_branch_mismatch_delete_fails_without_discovery_on_st_target() -> No
 def test_run_branch_mismatch_delete_discovery_fallback(tmp_path: Path) -> None:
     entry = DiffEntry(
         apm_code="ABCD",
-        repository_name="BB/uat-bitbucket-java-sample",
+        repository_name="UATPROJ/uat-bitbucket-java-sample",
         production_branch="master",
         target_reference="snyk-pr-scan-test",
     )
@@ -195,7 +195,7 @@ def test_run_branch_mismatch_delete_discovery_fallback(tmp_path: Path) -> None:
                 "rows": [
                     {
                         "repository_path": "UATPROJ/uat-bitbucket-java-sample",
-                        "repository_name": "BB/uat-bitbucket-java-sample",
+                        "repository_name": "uat-bitbucket-java-sample",
                         "apm_code": "ABCD",
                         "production_branch": "master",
                     }
@@ -207,7 +207,9 @@ def test_run_branch_mismatch_delete_discovery_fallback(tmp_path: Path) -> None:
     client = MagicMock(spec=SnykRestClient)
     client.group_id = "group-uuid"
     client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ABCD"}]
-    client.iter_org_targets.return_value = [_target(display_name="BB/uat-bitbucket-java-sample")]
+    client.iter_org_targets.return_value = [
+        _target(display_name="UATPROJ/uat-bitbucket-java-sample"),
+    ]
     client.get_org_target.return_value = _st_target_detail()
     manifest_path = tmp_path / "manifest.json"
 

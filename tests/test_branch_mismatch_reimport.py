@@ -15,6 +15,7 @@ from snyk.branch_mismatch_reimport import (
     BranchMismatchReimportOptions,
     DiffEntry,
     build_import_payload,
+    find_targets_by_display_name,
     import_target_name,
     load_diff_entries,
     run_branch_mismatch_reimport,
@@ -43,23 +44,37 @@ def _target(
     *,
     target_id: str = "tgt-1",
     display_name: str = "BB/my-service",
-    branch: str = "develop",
     project_key: str = "P1",
     repo_slug: str = "my-service",
     integration_id: str = "int-1",
+    branch: str | None = None,
 ) -> dict[str, object]:
+    attrs: dict[str, object] = {
+        "display_name": display_name,
+        "projectKey": project_key,
+        "repoSlug": repo_slug,
+    }
+    if branch is not None:
+        attrs["target_reference"] = branch
     return {
         "id": target_id,
-        "attributes": {
-            "display_name": display_name,
-            "target_reference": branch,
-            "projectKey": project_key,
-            "repoSlug": repo_slug,
-        },
+        "attributes": attrs,
         "relationships": {
             "integration": {"data": {"id": integration_id}},
         },
     }
+
+
+def _client_with_org(*, targets: list[dict[str, object]]) -> MagicMock:
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.token = "token"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
+    client.iter_org_targets.return_value = targets
+    client.iter_org_integrations.return_value = [
+        {"id": "int-1", "type": "bitbucket-server"},
+    ]
+    return client
 
 
 def test_load_diff_entries_valid(tmp_path: Path) -> None:
@@ -90,11 +105,32 @@ def test_load_diff_entries_rejects_missing_key(tmp_path: Path) -> None:
 
 
 def test_target_helpers() -> None:
-    target = _target()
+    target = _target(branch="develop")
     assert target_display_name(target) == "BB/my-service"
     assert target_branch_reference(target) == "develop"
     assert target_integration_id(target) == "int-1"
     assert target_project_key_and_slug(target) == ("P1", "my-service")
+
+
+def test_target_branch_reference_absent_when_omitted() -> None:
+    target = _target()
+    assert target_branch_reference(target) is None
+
+
+def test_find_targets_by_display_name_ignores_branch() -> None:
+    entry = DiffEntry(
+        apm_code="ORG1",
+        repository_name="BB/my-service",
+        production_branch="master",
+        target_reference="develop",
+    )
+    matches = find_targets_by_display_name(
+        [_target(branch="main"), _target(display_name="other")],
+        entry,
+        integration_id="int-1",
+    )
+    assert len(matches) == 1
+    assert matches[0]["id"] == "tgt-1"
 
 
 def test_import_target_name_normalizes_bb_prefix() -> None:
@@ -122,10 +158,7 @@ def test_run_branch_mismatch_reimport_dry_run() -> None:
         production_branch="master",
         target_reference="develop",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
-    client.iter_org_targets.return_value = [_target()]
+    client = _client_with_org(targets=[_target()])
 
     report = run_branch_mismatch_reimport(
         client,
@@ -145,11 +178,7 @@ def test_run_branch_mismatch_reimport_delete_and_import(tmp_path: Path) -> None:
         production_branch="master",
         target_reference="develop",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.token = "token"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
-    client.iter_org_targets.return_value = [_target()]
+    client = _client_with_org(targets=[_target()])
     client.get_org_target.return_value = _target()
 
     def fake_import(cmd: str, batch_file: Path, *, token: str, cwd: Path | None) -> subprocess.CompletedProcess[str]:
@@ -180,10 +209,7 @@ def test_run_branch_mismatch_reimport_not_found() -> None:
         production_branch="master",
         target_reference="develop",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
-    client.iter_org_targets.return_value = []
+    client = _client_with_org(targets=[])
 
     report = run_branch_mismatch_reimport(
         client,
@@ -195,20 +221,16 @@ def test_run_branch_mismatch_reimport_not_found() -> None:
     assert report["not_found"][0]["candidates_returned"] == 0
 
 
-def test_run_branch_mismatch_reimport_branch_mismatch_diagnostics() -> None:
+def test_run_branch_mismatch_reimport_near_match_diagnostics() -> None:
     entry = DiffEntry(
         apm_code="ORG1",
         repository_name="BB/my-service",
         production_branch="master",
         target_reference="develop",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
-    client.iter_org_targets.return_value = [
-        _target(branch="main"),
-        _target(display_name="PROJ/my-service", branch="develop"),
-    ]
+    client = _client_with_org(
+        targets=[_target(display_name="PROJ/my-service", integration_id="int-1")],
+    )
 
     report = run_branch_mismatch_reimport(
         client,
@@ -218,8 +240,7 @@ def test_run_branch_mismatch_reimport_branch_mismatch_diagnostics() -> None:
 
     nf = report["not_found"][0]
     assert nf["reason"] == "target_not_found"
-    assert nf["candidates_returned"] == 2
-    assert nf["same_display_name_branches"] == ["main"]
+    assert nf["candidates_returned"] == 1
     assert nf["near_match_display_names"] == ["PROJ/my-service"]
 
 
@@ -236,13 +257,12 @@ def test_run_branch_mismatch_reimport_same_org_multiple_repos() -> None:
         production_branch="master",
         target_reference="develop",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
-    client.iter_org_targets.return_value = [
-        _target(target_id="tgt-a", display_name="BB/service-a", repo_slug="service-a"),
-        _target(target_id="tgt-b", display_name="BB/service-b", repo_slug="service-b"),
-    ]
+    client = _client_with_org(
+        targets=[
+            _target(target_id="tgt-a", display_name="BB/service-a", repo_slug="service-a"),
+            _target(target_id="tgt-b", display_name="BB/service-b", repo_slug="service-b"),
+        ],
+    )
 
     report = run_branch_mismatch_reimport(
         client,
@@ -256,8 +276,8 @@ def test_run_branch_mismatch_reimport_same_org_multiple_repos() -> None:
     assert report["skipped"][1]["target_id"] == "tgt-b"
 
 
-def test_run_branch_mismatch_reimport_scotia_stale_branch_diagnostic() -> None:
-    """UAT example: diff says master but target is on main — surfaces stale diff."""
+def test_run_branch_mismatch_reimport_matches_without_target_branch() -> None:
+    """Targets API does not expose branch; match by display_name only."""
     entry = DiffEntry(
         apm_code="ABCD",
         repository_name="BB/uat-bitbucket-java-sample",
@@ -267,10 +287,12 @@ def test_run_branch_mismatch_reimport_scotia_stale_branch_diagnostic() -> None:
     client = MagicMock(spec=SnykRestClient)
     client.group_id = "group-uuid"
     client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ABCD"}]
+    client.iter_org_integrations.return_value = [
+        {"id": "int-1", "type": "bitbucket-server"},
+    ]
     client.iter_org_targets.return_value = [
         _target(
             display_name="BB/uat-bitbucket-java-sample",
-            branch="main",
             repo_slug="uat-bitbucket-java-sample",
         ),
     ]
@@ -281,11 +303,38 @@ def test_run_branch_mismatch_reimport_scotia_stale_branch_diagnostic() -> None:
         BranchMismatchReimportOptions(dry_run=True),
     )
 
-    nf = report["not_found"][0]
-    assert nf["reason"] == "target_not_found"
-    assert nf["same_display_name_branches"] == ["main"]
-    assert nf["production_branch"] == "snyk-pr-scan-test"
-    assert nf["target_reference"] == "master"
+    assert report["skipped"][0]["reason"] == "dry_run"
+    assert report["skipped"][0]["target_id"] == "tgt-1"
+
+
+def test_run_branch_mismatch_reimport_integration_type_filter() -> None:
+    entry = DiffEntry(
+        apm_code="ORG1",
+        repository_name="BB/my-service",
+        production_branch="master",
+        target_reference="develop",
+    )
+    client = MagicMock(spec=SnykRestClient)
+    client.group_id = "group-uuid"
+    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
+    client.iter_org_integrations.return_value = [
+        {"id": "int-cloud", "type": "bitbucket-cloud"},
+    ]
+    client.iter_org_targets.return_value = [
+        _target(integration_id="int-server"),
+        _target(target_id="tgt-cloud", integration_id="int-cloud"),
+    ]
+
+    report = run_branch_mismatch_reimport(
+        client,
+        [entry],
+        BranchMismatchReimportOptions(
+            dry_run=True,
+            integration_type="bitbucket-cloud",
+        ),
+    )
+
+    assert report["skipped"][0]["target_id"] == "tgt-cloud"
 
 
 def test_run_branch_mismatch_reimport_already_correct() -> None:
@@ -295,9 +344,7 @@ def test_run_branch_mismatch_reimport_already_correct() -> None:
         production_branch="master",
         target_reference="master",
     )
-    client = MagicMock(spec=SnykRestClient)
-    client.group_id = "group-uuid"
-    client.iter_group_orgs.return_value = [{"id": "org-1", "name": "ORG1"}]
+    client = _client_with_org(targets=[])
 
     report = run_branch_mismatch_reimport(
         client,

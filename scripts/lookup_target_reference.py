@@ -1,8 +1,8 @@
 """Build output.json for branch diff from Snyk REST APIs.
 
 Branch (``target_reference``) comes from the **Projects API**
-(``attributes.target_reference`` on bitbucket-server projects). On single-tenant
-Snyk the Targets API often omits ``attributes.target_reference``; do not rely on it.
+(``attributes.target_reference`` on bitbucket-server projects). The Targets API
+does not expose branch — use Projects API only for diff generation.
 """
 
 from __future__ import annotations

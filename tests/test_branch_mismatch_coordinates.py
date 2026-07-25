@@ -17,7 +17,7 @@ from snyk.branch_mismatch_reimport import (
 def _entry(**overrides: str) -> DiffEntry:
     defaults = {
         "apm_code": "ABCD",
-        "repository_name": "BB/uat-bitbucket-java-sample",
+        "repository_name": "UATPROJ/uat-bitbucket-java-sample",
         "production_branch": "master",
         "target_reference": "develop",
     }
@@ -46,11 +46,13 @@ def test_resolve_reimport_coordinates_from_target() -> None:
 def test_resolve_reimport_coordinates_discovery_fallback() -> None:
     detail = {
         "id": "tgt-1",
-        "attributes": {"display_name": "BB/uat-bitbucket-java-sample"},
+        "attributes": {"display_name": "UATPROJ/uat-bitbucket-java-sample"},
         "relationships": {"integration": {"data": {"id": "int-1"}}},
     }
     index = {
-        "BB/uat-bitbucket-java-sample": [("ABCD", "UATPROJ", "uat-bitbucket-java-sample")],
+        "UATPROJ/uat-bitbucket-java-sample": [
+            ("ABCD", "UATPROJ", "uat-bitbucket-java-sample"),
+        ],
     }
     coords = resolve_reimport_coordinates(detail, _entry(), index)
     assert coords.project_key == "UATPROJ"
@@ -72,14 +74,14 @@ def test_resolve_reimport_coordinates_discovery_not_found() -> None:
 
 
 def test_resolve_reimport_coordinates_ambiguous_discovery() -> None:
-    detail = {"id": "tgt-1", "attributes": {"display_name": "BB/shared"}}
+    detail = {"id": "tgt-1", "attributes": {"display_name": "PROJ/shared"}}
     index = {
-        "BB/shared": [
+        "PROJ/shared": [
             ("ORG1", "P1", "shared"),
             ("ORG2", "P2", "shared"),
         ],
     }
-    entry = _entry(apm_code="ORG1", repository_name="BB/shared")
+    entry = _entry(apm_code="ORG1", repository_name="PROJ/shared")
     coords = resolve_reimport_coordinates(detail, entry, index)
     assert coords.project_key == "P1"
     assert coords.coordinate_source == "discovery"
@@ -87,9 +89,9 @@ def test_resolve_reimport_coordinates_ambiguous_discovery() -> None:
     with pytest.raises(ValueError, match="ambiguous_discovery"):
         resolve_reimport_coordinates(
             detail,
-            _entry(apm_code="ORG1", repository_name="BB/shared"),
+            _entry(apm_code="ORG1", repository_name="PROJ/shared"),
             {
-                "BB/shared": [
+                "PROJ/shared": [
                     ("ORG1", "P1", "shared"),
                     ("ORG1", "P2", "shared"),
                 ],
@@ -97,7 +99,7 @@ def test_resolve_reimport_coordinates_ambiguous_discovery() -> None:
         )
 
 
-def test_load_discovery_coordinate_index(tmp_path: Path) -> None:
+def test_load_discovery_coordinate_index_by_repository_path(tmp_path: Path) -> None:
     path = tmp_path / "discovery.json"
     path.write_text(
         json.dumps(
@@ -117,6 +119,46 @@ def test_load_discovery_coordinate_index(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     index = load_discovery_coordinate_index(path)
-    assert index["BB/uat-bitbucket-java-sample"] == [
+    assert index["UATPROJ/uat-bitbucket-java-sample"] == [
         ("ABCD", "UATPROJ", "uat-bitbucket-java-sample"),
     ]
+    assert "BB/uat-bitbucket-java-sample" not in index
+
+
+def test_load_discovery_coordinate_index_juice_shop_path_matches_diff(tmp_path: Path) -> None:
+    """Diff repository_name matches repository_path; discovery slug differs."""
+    path = tmp_path / "discovery.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source": "bitbucket",
+                "rows": [
+                    {
+                        "repository_path": "tcannell-test/juice-shop",
+                        "repository_name": "juice-shop",
+                        "apm_code": "ABCD",
+                        "production_branch": "main",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    index = load_discovery_coordinate_index(path)
+    assert index["tcannell-test/juice-shop"] == [
+        ("ABCD", "tcannell-test", "juice-shop"),
+    ]
+    detail = {
+        "id": "tgt-1",
+        "attributes": {"display_name": "tcannell-test/juice-shop"},
+    }
+    entry = DiffEntry(
+        apm_code="ABCD",
+        repository_name="tcannell-test/juice-shop",
+        production_branch="main",
+        target_reference="other-branch",
+    )
+    coords = resolve_reimport_coordinates(detail, entry, index)
+    assert coords.project_key == "tcannell-test"
+    assert coords.repo_slug == "juice-shop"

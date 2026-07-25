@@ -2,8 +2,8 @@
 """Delete Snyk targets listed in a branch-mismatch diff.json.
 
 Matches targets by org name (``apm_code``) and ``repository_name`` (target
-``display_name``) only — not by branch on the Targets API (often absent on
-single-tenant). Writes an optional delete manifest for the reimport step.
+``display_name``) only — the Targets API does not expose branch for matching.
+Writes an optional delete manifest for the reimport step.
 
 Example::
 
@@ -74,8 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PATH",
         help=(
-            "Stage 1 discovery.json for projectKey/repoSlug when target GET omits them "
-            "(common on single-tenant)."
+            "Stage 1 discovery.json for projectKey/repoSlug when target GET omits them."
         ),
     )
     parser.add_argument("--dry-run", action="store_true")

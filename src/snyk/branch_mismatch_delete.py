@@ -13,11 +13,11 @@ from snyk.branch_mismatch_reimport import (
     DiffEntry,
     DiscoveryCoordinateIndex,
     _entry_record,
-    _repo_slug_from_repository_name,
+    find_targets_by_display_name,
     load_discovery_coordinate_index,
     resolve_reimport_coordinates,
-    target_display_name,
     target_integration_id,
+    target_not_found_diagnostics,
 )
 from snyk.enrichment import build_name_to_org_id
 
@@ -61,31 +61,14 @@ def _find_targets_by_display_name(
     targets: list[dict[str, Any]],
     entry: DiffEntry,
 ) -> list[dict[str, Any]]:
-    matches: list[dict[str, Any]] = []
-    for target in targets:
-        display = target_display_name(target)
-        if display == entry.repository_name:
-            matches.append(target)
-    return matches
+    return find_targets_by_display_name(targets, entry)
 
 
 def _target_not_found_diagnostics(
     targets: list[dict[str, Any]],
     entry: DiffEntry,
 ) -> dict[str, Any]:
-    near_match_names: list[str] = []
-    slug = _repo_slug_from_repository_name(entry.repository_name)
-    for target in targets:
-        display = target_display_name(target)
-        if display is None:
-            continue
-        if display != entry.repository_name and slug and slug in display:
-            if display not in near_match_names:
-                near_match_names.append(display)
-    out: dict[str, Any] = {"candidates_returned": len(targets)}
-    if near_match_names:
-        out["near_match_display_names"] = near_match_names
-    return out
+    return target_not_found_diagnostics(targets, entry)
 
 
 def _manifest_entry(

@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Delete and reimport Snyk targets with mismatched branch references.
 
-.. deprecated::
-   Prefer the split workflow on single-tenant Snyk (Scotia UAT):
-
-   1. ``scripts/delete_mismatched_targets.py`` — delete by display name + manifest
-   2. ``scripts/generate_branch_reimport_targets.py`` — build import batch JSON
-   3. ``snyk-api-import import --file=...``
-
-   This monolithic script matches on Targets API ``target_reference``, which is
-   often absent on single-tenant; use the split scripts instead.
+Matches targets for deletion by ``display_name`` only (Targets API identity).
+Branch in ``diff.json`` comes from the Projects API via ``lookup_target_reference.py``;
+the Targets API does not expose branch for matching.
 
 Reads a diff.json artifact (apm_code, repository_name, production_branch,
 target_reference), deletes each mismatched target, and reimports via snyk-api-import.
@@ -20,8 +14,16 @@ Example::
     export SNYK_GROUP_ID='...'
     PYTHONPATH=src python scripts/reimport_mismatched_targets.py \\
         --input diff.json \\
+        --discovery discovery.json \\
         --dry-run \\
         --limit 5
+
+Bitbucket Cloud test org::
+
+    PYTHONPATH=src python scripts/reimport_mismatched_targets.py \\
+        --input diff.json \\
+        --integration-type bitbucket-cloud \\
+        --dry-run
 """
 
 from __future__ import annotations
@@ -46,6 +48,8 @@ from snyk.branch_mismatch_reimport import (  # noqa: E402
     load_diff_entries,
     run_branch_mismatch_reimport,
 )
+
+_INTEGRATION_TYPES = ("bitbucket-server", "bitbucket-cloud")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +85,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("."),
         metavar="PATH",
         help="Directory for branch-reimport-batch-*.json files (and snyk-api-import cwd).",
+    )
+    parser.add_argument(
+        "--discovery",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Stage 1 discovery.json for projectKey/repoSlug when target GET omits them."
+        ),
+    )
+    parser.add_argument(
+        "--integration-type",
+        choices=_INTEGRATION_TYPES,
+        default="bitbucket-server",
+        help="SCM integration type to match targets against (default: bitbucket-server).",
     )
     parser.add_argument(
         "--dry-run",
@@ -145,6 +164,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         assert_safe_filesystem_path(args.input)
         assert_safe_filesystem_path(args.output)
         assert_safe_filesystem_path(args.import_batch_dir)
+        if args.discovery is not None:
+            assert_safe_filesystem_path(args.discovery)
         entries = load_diff_entries(args.input)
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
@@ -158,6 +179,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         snyk_api_import_cmd=args.snyk_api_import_cmd,
         import_batch_dir=args.import_batch_dir,
         delay_ms=args.delay_ms,
+        integration_type=args.integration_type,
+        discovery_path=args.discovery,
     )
 
     client = SnykRestClient(settings)

@@ -38,7 +38,6 @@ def test_iter_org_targets_pagination_and_display_name_filter() -> None:
                             "id": "tgt-1",
                             "attributes": {
                                 "display_name": "BB/my-service",
-                                "target_reference": "develop",
                             },
                         }
                     ],
@@ -94,7 +93,6 @@ def test_get_org_target() -> None:
             "id": "tgt-1",
             "attributes": {
                 "display_name": "BB/my-service",
-                "target_reference": "develop",
                 "projectKey": "P1",
                 "repoSlug": "my-service",
             },

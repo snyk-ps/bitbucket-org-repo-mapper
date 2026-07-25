@@ -446,7 +446,7 @@ PYTHONPATH=src python src/main.py snyk-post-import-cleanup \
 
 ### Branch mismatch remediation (Scotia-style)
 
-Operational workflow when Snyk targets were imported on the wrong branch. Use the **split scripts** on single-tenant Snyk (e.g. Scotia UAT): the Targets API often omits `attributes.target_reference`; branch comes from the **Projects API** instead.
+Operational workflow when Snyk targets were imported on the wrong branch. The **Targets API** identifies targets (`display_name`); **branch** comes from the **Projects API** only — the Targets API does not expose branch for matching on any tenant. See [Snyk Targets API](https://docs.snyk.io/developer-tools/snyk-api/reference/targets).
 
 **Operator flow:**
 
@@ -458,9 +458,9 @@ Operational workflow when Snyk targets were imported on the wrong branch. Use th
 
 Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and `target_reference`. `target_reference` is used when **building** the diff (Projects API branch vs YAML); it is **not** used to locate targets for delete.
 
-**Diff field provenance:** [`lookup_target_reference.py`](scripts/lookup_target_reference.py) sets `target_reference` from **project** `attributes.target_reference` (bitbucket-server), joined to target `display_name` by target id. Do not use Targets API `attributes.target_reference` on single-tenant — it is often `None`.
+**Diff field provenance:** [`lookup_target_reference.py`](scripts/lookup_target_reference.py) sets `target_reference` from **project** `attributes.target_reference` (bitbucket-server), joined to target `display_name` by target id. Do not read branch from the Targets API.
 
-On single-tenant, target GET also omits `projectKey` / `repoSlug`. Pass Stage 1 **`discovery.json`** to the delete script via `--discovery` so the reimport manifest can be built from `repository_path`.
+When target GET omits `projectKey` / `repoSlug`, pass Stage 1 **`discovery.json`** via `--discovery`. Coordinate lookup matches diff `repository_name` to discovery `repository_path` (not discovery `repository_name`, which is the Bitbucket slug).
 
 **Destructive** — delete removes targets and all associated projects. Run `--dry-run` in UAT first.
 
@@ -473,7 +473,7 @@ On single-tenant, target GET also omits `projectKey` / `repoSlug`. Pass Stage 1 
 | `--input PATH` | Yes | `diff.json` array file. |
 | `--output PATH` | No | Delete report (default: `branch-delete-report.json`). |
 | `--manifest PATH` | No | Write reimport manifest after successful deletes. |
-| `--discovery PATH` | No | Stage 1 `discovery.json` for `projectKey`/`repoSlug` when target GET omits them (single-tenant). |
+| `--discovery PATH` | No | Stage 1 `discovery.json` for `projectKey`/`repoSlug` when target GET omits them. |
 | `--dry-run` | No | Match only; no DELETE. |
 | `--limit N` | No | Process first N entries (UAT smoke tests). |
 
@@ -485,16 +485,25 @@ On single-tenant, target GET also omits `projectKey` / `repoSlug`. Pass Stage 1 
 | `--output-dir PATH` | No | Batch JSON directory (default: `.`). |
 | `--repos-per-batch N` | No | Targets per file (default: `50`). |
 
-#### Legacy monolithic script (`scripts/reimport_mismatched_targets.py`)
+#### Monolithic script (`scripts/reimport_mismatched_targets.py`)
 
-**Deprecated** on single-tenant — matches delete on Targets API `target_reference`, which is often absent. Prefer the split flow above.
+Delete-and-reimport in one step. Matches delete by target `display_name` only (same as the split delete script). Supports `--discovery` for coordinate fallback and `--integration-type` (`bitbucket-server` default; use `bitbucket-cloud` for test orgs).
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--input PATH` | Yes | `diff.json` array file. |
+| `--discovery PATH` | No | Stage 1 `discovery.json` for import coordinates when target GET omits them. |
+| `--integration-type` | No | `bitbucket-server` (default) or `bitbucket-cloud`. |
+| `--dry-run` | No | Match only; no DELETE or import. |
+| `--skip-import` | No | Delete only; skip `snyk-api-import`. |
+| `--limit N` | No | Process first N entries. |
 
 **Operational notes:**
 
 - Install `snyk-api-import` globally or use `npx snyk-api-import`.
 - Do **not** delete or move `imported-targets.log` while an import is running.
 - Custom branching must be enabled before reimport.
-- Set `SNYK_API` to your tenant API origin on single-tenant (not `https://api.snyk.io`).
+- Set `SNYK_API` to your tenant API origin when not using `https://api.snyk.io`.
 
 **UAT re-test checklist:**
 
