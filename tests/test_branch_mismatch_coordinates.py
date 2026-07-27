@@ -162,3 +162,49 @@ def test_load_discovery_coordinate_index_juice_shop_path_matches_diff(tmp_path: 
     coords = resolve_reimport_coordinates(detail, entry, index)
     assert coords.project_key == "tcannell-test"
     assert coords.repo_slug == "juice-shop"
+
+
+def test_resolve_reimport_coordinates_prefixed_diff_unprefixed_discovery() -> None:
+    """Production case: diff has BB/ prefix, discovery path does not."""
+    index = {
+        "tcannell-test/juice-shop": [
+            ("ABCD", "tcannell-test", "juice-shop"),
+        ],
+    }
+    detail = {
+        "id": "tgt-1",
+        "attributes": {"display_name": "BB/tcannell-test/juice-shop"},
+    }
+    entry = DiffEntry(
+        apm_code="ABCD",
+        repository_name="BB/tcannell-test/juice-shop",
+        production_branch="main",
+        target_reference="other-branch",
+    )
+    coords = resolve_reimport_coordinates(detail, entry, index)
+    assert coords.project_key == "tcannell-test"
+    assert coords.repo_slug == "juice-shop"
+    assert coords.coordinate_source == "discovery"
+
+
+def test_resolve_reimport_coordinates_scotia_unprefixed_path() -> None:
+    """Scotia-style unprefixed diff matches unprefixed discovery path."""
+    index = {
+        "MYPROJ/my-service": [
+            ("APM1", "MYPROJ", "my-service"),
+        ],
+    }
+    detail = {
+        "id": "tgt-1",
+        "attributes": {"display_name": "MYPROJ/my-service"},
+    }
+    entry = DiffEntry(
+        apm_code="APM1",
+        repository_name="MYPROJ/my-service",
+        production_branch="master",
+        target_reference="develop",
+    )
+    coords = resolve_reimport_coordinates(detail, entry, index)
+    assert coords.project_key == "MYPROJ"
+    assert coords.repo_slug == "my-service"
+    assert coords.coordinate_source == "discovery"

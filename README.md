@@ -460,7 +460,7 @@ Each diff entry requires `apm_code`, `repository_name`, `production_branch`, and
 
 **Diff field provenance:** [`lookup_target_reference.py`](scripts/lookup_target_reference.py) sets `target_reference` from **project** `attributes.target_reference` (bitbucket-server), joined to target `display_name` by target id. Do not read branch from the Targets API.
 
-When target GET omits `projectKey` / `repoSlug`, pass Stage 1 **`discovery.json`** via `--discovery`. Coordinate lookup matches diff `repository_name` to discovery `repository_path` (not discovery `repository_name`, which is the Bitbucket slug).
+When target GET omits `projectKey` / `repoSlug`, pass Stage 1 **`discovery.json`** via `--discovery`. Coordinate lookup matches diff `repository_name` to discovery `repository_path` (not discovery `repository_name`, which is the Bitbucket slug). When diff `repository_name` includes the Stage 3 import prefix (`BB/`), the lookup strips that prefix before matching unprefixed discovery paths.
 
 **Destructive** — delete removes targets and all associated projects. Run `--dry-run` in UAT first.
 

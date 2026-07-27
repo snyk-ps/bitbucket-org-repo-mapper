@@ -159,11 +159,24 @@ def load_discovery_coordinate_index(path: Path) -> DiscoveryCoordinateIndex:
     return index
 
 
+def discovery_lookup_name(repository_name: str) -> str:
+    """Return discovery index key for diff ``repository_name``.
+
+    Strips ``APP_TYPE_PREFIX`` when present so prefixed Snyk display names
+    (Stage 3 import convention) match unprefixed discovery ``repository_path``.
+    """
+    if repository_name.startswith(APP_TYPE_PREFIX):
+        return repository_name[len(APP_TYPE_PREFIX) :]
+    return repository_name
+
+
 def _lookup_discovery_coordinates(
     index: DiscoveryCoordinateIndex,
     entry: DiffEntry,
 ) -> tuple[str, str]:
-    candidates = index.get(entry.repository_name, [])
+    # Diff may carry BB/ import prefix; discovery repository_path does not.
+    lookup_key = discovery_lookup_name(entry.repository_name)
+    candidates = index.get(lookup_key, [])
     if not candidates:
         msg = f"discovery_not_found for repository_name={entry.repository_name!r}"
         raise ValueError(msg)
