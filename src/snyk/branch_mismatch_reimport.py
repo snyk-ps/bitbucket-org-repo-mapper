@@ -128,7 +128,7 @@ def target_project_key_and_slug(target: dict[str, Any]) -> tuple[str, str] | Non
 
 CoordinateSource = Literal["target", "discovery"]
 
-DiscoveryCoordinateIndex = dict[str, list[tuple[str | None, str, str]]]
+DiscoveryCoordinateIndex = dict[tuple[str, str], list[tuple[str, str]]]
 
 
 @dataclass(frozen=True)
@@ -141,32 +141,36 @@ class CoordinateResolution:
 
 
 def load_discovery_coordinate_index(path: Path) -> DiscoveryCoordinateIndex:
-    """Build repository_path → [(apm_code, project_key, repo_slug), ...] from discovery."""
+    """Build (repository_name, apm_code) → [(project_key, repo_slug), ...] from discovery."""
     rows, _source = load_rows_from_stage1_file(path)
     index: DiscoveryCoordinateIndex = {}
     for row in rows:
-        raw_path = row.get("repository_path")
-        if not isinstance(raw_path, str) or not raw_path.strip():
+        raw_name = row.get("repository_name")
+        raw_apm = row.get("apm_code")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            continue
+        if not isinstance(raw_apm, str) or not raw_apm.strip():
             continue
         repo_key = row_repo_key(row)
         if repo_key is None:
             continue
         project_key, repo_slug = repo_key
-        raw_apm = row.get("apm_code")
-        apm_code = raw_apm.strip() if isinstance(raw_apm, str) and raw_apm.strip() else None
-        path_key = raw_path.strip()
-        index.setdefault(path_key, []).append((apm_code, project_key, repo_slug))
+        slug_key = raw_name.strip()
+        apm_key = raw_apm.strip()
+        index.setdefault((slug_key, apm_key), []).append((project_key, repo_slug))
     return index
 
 
-def discovery_lookup_name(repository_name: str) -> str:
-    """Return discovery index key for diff ``repository_name``.
+def discovery_lookup_slug(repository_name: str) -> str:
+    """Extract repo slug from diff ``repository_name`` for discovery lookup.
 
-    Strips ``APP_TYPE_PREFIX`` when present so prefixed Snyk display names
-    (Stage 3 import convention) match unprefixed discovery ``repository_path``.
+    Strips ``APP_TYPE_PREFIX`` when present (Stage 3 ``BB/{slug}`` convention),
+    then takes the final ``/`` segment when a path remains.
     """
     if repository_name.startswith(APP_TYPE_PREFIX):
-        return repository_name[len(APP_TYPE_PREFIX) :]
+        repository_name = repository_name[len(APP_TYPE_PREFIX) :]
+    if "/" in repository_name:
+        return repository_name.rsplit("/", 1)[-1]
     return repository_name
 
 
@@ -174,20 +178,14 @@ def _lookup_discovery_coordinates(
     index: DiscoveryCoordinateIndex,
     entry: DiffEntry,
 ) -> tuple[str, str]:
-    # Diff may carry BB/ import prefix; discovery repository_path does not.
-    lookup_key = discovery_lookup_name(entry.repository_name)
+    slug = discovery_lookup_slug(entry.repository_name)
+    lookup_key = (slug, entry.apm_code)
     candidates = index.get(lookup_key, [])
     if not candidates:
         msg = f"discovery_not_found for repository_name={entry.repository_name!r}"
         raise ValueError(msg)
     if len(candidates) == 1:
-        return candidates[0][1], candidates[0][2]
-    by_apm = [c for c in candidates if c[0] == entry.apm_code]
-    if len(by_apm) == 1:
-        return by_apm[0][1], by_apm[0][2]
-    if not by_apm:
-        msg = f"discovery_not_found for repository_name={entry.repository_name!r}"
-        raise ValueError(msg)
+        return candidates[0]
     msg = f"ambiguous_discovery for repository_name={entry.repository_name!r}"
     raise ValueError(msg)
 
