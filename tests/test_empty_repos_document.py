@@ -24,7 +24,7 @@ def test_build_empty_repos_document_filters_and_sorts() -> None:
             "is_empty": False,
         },
     ]
-    doc = build_empty_repos_document(rows)
+    doc = build_empty_repos_document(rows, source="bitbucket")
     assert doc["version"] == 1
     assert doc["source"] == "bitbucket"
     assert len(doc["repositories"]) == 2
@@ -33,5 +33,28 @@ def test_build_empty_repos_document_filters_and_sorts() -> None:
 
 
 def test_build_empty_repos_document_empty_list() -> None:
-    doc = build_empty_repos_document([])
+    doc = build_empty_repos_document([], source="bitbucket")
     assert doc["repositories"] == []
+
+
+def test_build_empty_repos_document_github_uses_github_org() -> None:
+    rows = [
+        {
+            "repository_path": "snyk-ps/marketplace",
+            "repository_name": "marketplace",
+            "github_org": "snyk-ps",
+            "is_empty": True,
+        },
+        {
+            "repository_path": "snyk-ps/full",
+            "repository_name": "full",
+            "github_org": "snyk-ps",
+            "is_empty": False,
+        },
+    ]
+    doc = build_empty_repos_document(rows, source="github")
+    assert doc["source"] == "github"
+    assert len(doc["repositories"]) == 1
+    entry = doc["repositories"][0]
+    assert entry["github_org"] == "snyk-ps"
+    assert "bitbucket_project_name" not in entry
