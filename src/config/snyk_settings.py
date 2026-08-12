@@ -87,7 +87,7 @@ def _derive_api_origin() -> str:
     return DEFAULT_SNYK_API_ORIGIN.rstrip("/")
 
 
-def load_snyk_settings() -> SnykSettings:
+def load_snyk_settings(*, require_group_id: bool = True) -> SnykSettings:
     """Load settings from the environment (after optional ``load_dotenv_file``)."""
     token = os.environ.get("SNYK_TOKEN", "").strip()
     group_id = os.environ.get("SNYK_GROUP_ID", "").strip()
@@ -113,7 +113,7 @@ def load_snyk_settings() -> SnykSettings:
     if not token:
         msg = "SNYK_TOKEN is required"
         raise ValueError(msg)
-    if not group_id:
+    if require_group_id and not group_id:
         msg = "SNYK_GROUP_ID is required"
         raise ValueError(msg)
     return SnykSettings(

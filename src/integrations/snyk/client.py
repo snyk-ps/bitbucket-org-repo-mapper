@@ -87,7 +87,7 @@ def normalize_v1_projects_payload(parsed: Any) -> list[dict[str, Any]]:
 
 
 def normalize_rest_project(item: dict[str, Any]) -> dict[str, Any] | None:
-    """Turn a REST project resource into a flat project dict (id, name, type)."""
+    """Turn a REST project resource into a flat project dict (id, name, type, owner_id)."""
     pid = item.get("id")
     if not isinstance(pid, str) or not pid.strip():
         return None
@@ -101,6 +101,15 @@ def normalize_rest_project(item: dict[str, Any]) -> dict[str, Any] | None:
     raw_type = attrs.get("type")
     if isinstance(raw_type, str) and raw_type.strip():
         out["type"] = raw_type.strip()
+    relationships = item.get("relationships")
+    if isinstance(relationships, dict):
+        owner = relationships.get("owner")
+        if isinstance(owner, dict):
+            data = owner.get("data")
+            if isinstance(data, dict):
+                raw_owner_id = data.get("id")
+                if isinstance(raw_owner_id, str) and raw_owner_id.strip():
+                    out["owner_id"] = raw_owner_id.strip()
     return out
 
 
@@ -257,10 +266,14 @@ class SnykRestClient:
             retry=_is_retriable_request_failure,
         )
 
-    def iter_group_orgs(self) -> list[dict[str, str]]:
-        """Return ``{\"id\", \"name\"}`` for each org in the configured group."""
+    def iter_group_orgs(self, *, group_id: str | None = None) -> list[dict[str, str]]:
+        """Return ``{\"id\", \"name\"}`` for each org in the configured or given group."""
         s = self._settings
-        base_path = f"{s.rest_root}/groups/{s.group_id}/orgs"
+        gid = (group_id or s.group_id).strip()
+        if not gid:
+            msg = "group_id is required to list group orgs"
+            raise ValueError(msg)
+        base_path = f"{s.rest_root}/groups/{gid}/orgs"
         sep = "&" if "?" in base_path else "?"
         first = f"{base_path}{sep}version={s.api_version}"
         out: list[dict[str, str]] = []
@@ -548,6 +561,41 @@ class SnykRestClient:
                 "Content-Type": "application/vnd.api+json",
             },
             method="PATCH",
+        )
+
+        def inner() -> None:
+            try:
+                with urlopen(req, timeout=self._timeout) as resp:
+                    resp.read()
+            except HTTPError as exc:
+                if not _is_retriable_request_failure(exc):
+                    detail = exc.read().decode("utf-8", errors="replace")
+                    msg = f"Snyk API HTTP {exc.code} for {url}: {detail[:500]}"
+                    raise RuntimeError(msg) from exc
+                raise
+
+        run_with_retries(
+            inner,
+            max_attempts=self._settings.http_max_attempts,
+            base_backoff_s=self._settings.http_backoff_seconds,
+            retry=_is_retriable_request_failure,
+        )
+
+    def clear_project_owner(self, org_id: str, project_id: str) -> None:
+        """Clear project owner via Snyk v1 PUT ``{\"owner\": null}``."""
+        oid = org_id.strip()
+        pid = project_id.strip()
+        url = f"{self._settings.v1_root}/org/{oid}/project/{pid}"
+        body = json.dumps({"owner": None}).encode("utf-8")
+        req = Request(
+            url,
+            data=body,
+            headers={
+                "Authorization": f"token {self._settings.token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="PUT",
         )
 
         def inner() -> None:

@@ -54,3 +54,11 @@ def test_load_snyk_settings_invalid_integrations_api(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("SNYK_INTEGRATIONS_API", "graphql")
     with pytest.raises(ValueError, match="SNYK_INTEGRATIONS_API"):
         load_snyk_settings()
+
+
+def test_load_snyk_settings_optional_group_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SNYK_TOKEN", "t")
+    monkeypatch.delenv("SNYK_GROUP_ID", raising=False)
+    s = load_snyk_settings(require_group_id=False)
+    assert s.group_id == ""
+    assert s.token == "t"

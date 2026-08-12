@@ -602,6 +602,45 @@ PYTHONPATH=src python scripts/reimport_mismatched_targets.py \
   --env-file .env
 ```
 
+### Clear project owners (`scripts/clear_project_owners.py`)
+
+One-off cleanup after **Stage 4** live runs. Stage 4 PATCHes recurring test frequency via REST and requires `SNYK_USER_ID` in `relationships.owner`, which **assigns a project owner** on every project touched — including projects that were previously unassigned. This script clears those owners with v1 `PUT /v1/org/{orgId}/project/{projectId}` and body `{"owner": null}`.
+
+A future Stage 4 change will preserve existing project owners (or use a transition UUID to keep unassigned projects unassigned). Until then, run this script after Stage 4 if you need owners reverted.
+
+**Not destructive to projects** — only clears the owner field. Run `--dry-run` first.
+
+| Variable / flag | Required | Description |
+|-----------------|----------|-------------|
+| `SNYK_TOKEN` | Yes | Snyk API token with permission to edit projects. |
+| `SNYK_GROUP_ID` | Group scope only | Group UUID when using `--group` without an explicit id. |
+| `--group GROUP_ID` | One of `--group` / `--orgs` | List all orgs in the group and clear owner on every project. |
+| `--orgs ORG_IDS` | One of `--group` / `--orgs` | Comma-separated org UUIDs; `SNYK_GROUP_ID` not required. |
+| `--output PATH` | No | Report JSON (default: `clear-project-owner-report.json`). |
+| `--dry-run` | No | List projects that would be updated; no PUT requests. |
+| `--limit N` | No | Process first N projects across all orgs (UAT smoke tests). |
+
+Group dry-run example:
+
+```bash
+export SNYK_TOKEN='your-token'
+export SNYK_GROUP_ID='your-group-uuid'
+
+PYTHONPATH=src python scripts/clear_project_owners.py \
+  --group "$SNYK_GROUP_ID" \
+  --dry-run \
+  --env-file .env
+```
+
+Explicit orgs (no group env required):
+
+```bash
+PYTHONPATH=src python scripts/clear_project_owners.py \
+  --orgs org-uuid-1,org-uuid-2 \
+  --output clear-project-owner-report.json \
+  --env-file .env
+```
+
 ## Testing
 
 ```bash
@@ -630,6 +669,6 @@ pytest
 | `src/common/` | Discovery document, mapper, output state, spreadsheet ingestion |
 | `src/config/` | Environment and optional `.env` |
 | `src/integrations/` | HTTP retry, Bitbucket client, GitHub client, Snyk REST client |
-| `src/snyk/` | Org/import builders, enrichment helpers, branch mismatch reimport |
-| `scripts/` | Operational scripts (branch mismatch reimport) |
+| `src/snyk/` | Org/import builders, enrichment helpers, branch mismatch reimport, project owner cleanup |
+| `scripts/` | Operational scripts (branch mismatch reimport, clear project owners) |
 | `tests/` | Unit tests |
