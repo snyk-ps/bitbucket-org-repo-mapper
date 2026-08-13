@@ -1,8 +1,31 @@
 # three-stage-snyk-pipeline Specification
 
 ## Purpose
-TBD - created by archiving change ux-three-stage-pipeline. Update Purpose after archive.
+
+**snyk-org-repo-mapper** is a staged Python CLI for onboarding SCM repositories into Snyk. **Stage 1** produces a versioned discovery JSON from one of: Bitbucket Server (full crawl), a spreadsheet-driven Bitbucket repo list, or GitHub organization repositories. **Stages 2–4** operate on Snyk APIs and local artifacts: org list generation, optional Universal Broker plan/apply and integration settings, import target enrichment with `orgId`/`integrationId`, and optional post-import cleanup. Bitbucket and GitHub are supported discovery sources; downstream stages are Snyk-centric and do not call the source SCM (except spreadsheet mode, which uses Bitbucket HTTP during Stage 1 only).
+
 ## Requirements
+
+### Requirement: Product identity
+
+The tool SHALL be named and documented as **snyk-org-repo-mapper**. Package metadata and primary documentation SHALL describe it as a multi-SCM Snyk onboarding pipeline, not a Bitbucket-only mapper.
+
+#### Scenario: README names the product
+
+- **WHEN** a reader opens the repository README
+- **THEN** the title SHALL be **snyk-org-repo-mapper**
+- **AND** the introduction SHALL describe Stage 1 as supporting Bitbucket and GitHub discovery
+
+#### Scenario: Package metadata names the product
+
+- **WHEN** a user inspects `pyproject.toml` `[project].name`
+- **THEN** the value SHALL be `snyk-org-repo-mapper`
+
+#### Scenario: Console scripts unchanged
+
+- **WHEN** a user runs `pip install -e .`
+- **THEN** the existing **`repo-mapper-*`** console entry points SHALL remain available on `PATH`
+
 ### Requirement: Stage 1 discovery produces a versioned intermediate document
 
 The discovery command SHALL support **three** ingress modes—Bitbucket Server, spreadsheet, and **GitHub**—and SHALL write a single **versioned** JSON document containing `rows` equivalent to the primary mapping semantics needed for Snyk Stages 2 and 3, including `apm_code`, `repository_path`, `repository_name`, `production_branch`, and `bitbucket_project_name` where applicable on Bitbucket and spreadsheet rows. For **Bitbucket** discovery (full crawl or spreadsheet-driven targeted list), each row SHALL include a boolean **`is_empty`**. For **GitHub** discovery, each row SHALL include the same boolean **`is_empty`** and the same committer metadata fields as Bitbucket. A repository SHALL be marked `is_empty: true` when it has zero commits **or** when repository metadata has **no usable default branch** (Bitbucket and GitHub each apply this rule to their respective API payloads).

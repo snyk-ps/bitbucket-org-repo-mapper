@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bitbucket-org-repo-mapper"
+name = "snyk-org-repo-mapper"
 version = "0.1.0"
-description = "Map Bitbucket Server repositories to AppSec metadata from YAML and API data."
+description = "Staged discovery and Snyk onboarding for Bitbucket Server and GitHub repositories—org planning, broker setup, import files, and post-import cleanup."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
