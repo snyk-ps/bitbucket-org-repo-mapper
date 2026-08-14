@@ -1,6 +1,6 @@
-# bitbucket-org-repo-mapper
+# snyk-org-repo-mapper
 
-This project helps you onboard Bitbucket Server repositories into Snyk in **stages**: produce a single **discovery** JSON from Bitbucket or from a spreadsheet, derive **`snyk-orgs.json`** for org creation, optionally plan and apply **Universal Broker** org–connection assignments, build **`snyk-import.json`** and resolve Snyk `orgId` / `integrationId` via the Snyk REST API, then optionally run **post-import cleanup** across the whole Snyk group. Stages 3 and 4 never call Bitbucket.
+This project helps you onboard Bitbucket Server and GitHub repositories into Snyk in **stages**: produce a single **discovery** JSON from Bitbucket, a spreadsheet, or GitHub orgs; derive **`snyk-orgs.json`** for org creation; optionally plan and apply **Universal Broker** org–connection assignments; build **`snyk-import.json`** and resolve Snyk `orgId` / `integrationId` via the Snyk REST API; then optionally run **post-import cleanup** across the whole Snyk group. Stages 3 and 4 never call the source SCM.
 
 ## Quick start
 
@@ -103,7 +103,7 @@ This project helps you onboard Bitbucket Server repositories into Snyk in **stag
 
    **Destructive:** deletes Dockerfile Snyk projects in every org in the group. Run with **`--dry-run`** first to review the report on stdout. Requires token permissions to delete projects, edit integrations, and edit org language settings. Existing Python projects may need a re-test before scan results reflect Python 3.12.
 
-After `pip install -e .`, the same flows are available as `repo-mapper-discover-bitbucket`, `repo-mapper-discover-spreadsheet`, `repo-mapper-discover-github`, `repo-mapper-snyk-orgs`, `repo-mapper-snyk-broker-plan`, `repo-mapper-snyk-broker-apply`, `repo-mapper-snyk-broker-integration-settings`, `repo-mapper-snyk-import`, and `repo-mapper-snyk-post-import-cleanup` on your `PATH`.
+After `pip install -e .`, the **snyk-org-repo-mapper** console entry points are available on your `PATH`: `repo-mapper-discover-bitbucket`, `repo-mapper-discover-spreadsheet`, `repo-mapper-discover-github`, `repo-mapper-snyk-orgs`, `repo-mapper-snyk-broker-plan`, `repo-mapper-snyk-broker-apply`, `repo-mapper-snyk-broker-integration-settings`, `repo-mapper-snyk-import`, and `repo-mapper-snyk-post-import-cleanup`.
 
 ## Requirements
 
@@ -118,6 +118,8 @@ After `pip install -e .`, the same flows are available as `repo-mapper-discover-
 - **Stage 4 (post-import cleanup):** `SNYK_TOKEN`, `SNYK_GROUP_ID`, `SNYK_USER_ID`; `SNYK_INTEGRATIONS_API` must be `v1`. Set `SNYK_API` to your tenant API origin on single-tenant instances (e.g. `https://api.example.my.snyk.io`, no `/rest` or `/v1` suffix). Token needs permission to delete projects, edit integrations, and edit org language settings. Use `--dry-run` before the first live run.
 
 ## Installation
+
+The Python package name is **`snyk-org-repo-mapper`** (formerly `bitbucket-org-repo-mapper`).
 
 ```bash
 pip install -r requirements.txt

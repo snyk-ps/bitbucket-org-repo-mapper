@@ -1,4 +1,4 @@
-"""Unified CLI dispatcher: discover → snyk-orgs → broker plan/apply/settings → snyk-import → post-import cleanup."""
+"""Unified CLI dispatcher for snyk-org-repo-mapper: discover → snyk-orgs → broker plan/apply/settings → snyk-import → post-import cleanup."""
 
 from __future__ import annotations
 
