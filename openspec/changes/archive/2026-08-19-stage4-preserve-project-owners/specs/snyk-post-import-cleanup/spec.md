@@ -49,7 +49,7 @@ After a successful recurring-test frequency PATCH, the stage SHALL remediate pro
 
 ### Requirement: SnykRestClient project owner v1 PUT support
 
-The implementation SHALL provide client methods for v1 project owner updates via `PUT /v1/org/{orgId}/project/{projectId}`: `clear_project_owner` (body `{"owner": null}`) and `set_project_owner` (body `{"owner": "<user_uuid>"}`), using the same HTTP retry behavior as existing client methods.
+The implementation SHALL provide client methods for v1 project owner updates via `PUT /v1/org/{orgId}/project/{projectId}`: `clear_project_owner` (body `{"owner": null}`) and `set_project_owner` (body `{"owner": {"id": "<user_uuid>"}}`), using the same HTTP retry behavior as existing client methods.
 
 #### Scenario: Clear project owner via v1 PUT
 
@@ -59,7 +59,7 @@ The implementation SHALL provide client methods for v1 project owner updates via
 #### Scenario: Restore project owner via v1 PUT
 
 - **WHEN** the stage remediates a project to its prior owner
-- **THEN** the client issues a v1 PUT with `{"owner": "<prior_owner_id>"}`
+- **THEN** the client issues a v1 PUT with `{"owner": {"id": "<prior_owner_id>"}}`
 
 ## MODIFIED Requirements
 
